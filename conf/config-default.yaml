@@ -641,7 +641,7 @@ deployment:                    # Deployment configurations
   #  config_provider: etcd     # Set the configuration center.
 
   admin:                       # Admin API
-    admin_key_required: false   # Enable Admin API authentication by default for security.
+    admin_key_required: true   # Enable Admin API authentication by default for security.
     admin_key:
       -
         name: admin                             # admin: write access to configurations.

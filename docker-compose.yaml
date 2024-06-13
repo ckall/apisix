@@ -1,0 +1,57 @@
+version: "3"
+
+services:
+  centos:
+#    image: production-stage:latest
+    build:
+        context: .
+        dockerfile: Dockerfile
+        args:
+            ENV: "master"
+    volumes:
+      - ./:/usr/local/apisix
+    depends_on:
+      - etcd
+    ports:
+      - "80:9080"
+      - "9180:9180"
+      - "9091:9091"
+      - "9090:9090"
+      - "9990:9990"
+    restart: always
+  etcd:
+    image: bitnami/etcd:latest
+    restart: always
+    ports:
+      - "2380:2380"
+      - "2379:2379"
+    environment:
+      ETCD_ENABLE_V2: "true"
+      ALLOW_NONE_AUTHENTICATION: "yes"
+      ETCD_ADVERTISE_CLIENT_URLS: "http://0.0.0.0:2379"
+      ETCD_LISTEN_CLIENT_URLS: "http://0.0.0.0:2379"
+
+  dashboard:
+    image: apache/apisix-dashboard:latest
+    restart: always
+    depends_on:
+      - etcd
+      - centos
+    volumes:
+      - ./conf/config.dashboard.yaml:/usr/local/apisix-dashboard/conf/conf.yaml
+      - ./conf/schema.json:/usr/local/apisix-dashboard/conf/schema.json
+    ports:
+      - "9002:9000"
+
+  etcdkeeper:
+    image: evildecay/etcdkeeper
+    ports:
+      - "28080:8080"
+    networks:
+      - etcd
+    depends_on:
+      - etcd
+networks:
+  centos:
+  etcd:
+  dashboard:

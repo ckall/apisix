@@ -16,7 +16,7 @@ local plugin_name = "jiuzhou-rbac"
 local method_post = "POST"
 local path = "http://172.16.179.166:8010/v1/user/route/app"
 local log = core.log
-local version = 2.0
+local version = "2.0"
 local schema = {}
 local metadata_schema = {}
 local ngx = ngx
@@ -96,11 +96,11 @@ function _M.rewrite(conf, ctx)
     })
     if not res then
         log.error(ngx.ERR, "Failed to make request: ", err)
-        return 500, { message = "request err1: " .. err, data = res, code = 500, request = request_body }
+        return 500, { message = "request err1: " .. err, data = nil, code = 500, request = request_body }
     end
     if res.status ~= 200 then
         log.error(ngx.ERR, "Failed to make request: ", res.body)
-        return 500, { message = "request err2: " .. res.body, data = res, code = 500, request = request_body }
+        return res.status, res.body
     end
     local body
     body, err = json.decode(res.body)

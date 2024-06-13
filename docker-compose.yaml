@@ -9,7 +9,7 @@ services:
         args:
             ENV: "master"
     volumes:
-      - ./:/apisix/
+      - ./:/usr/local/apisix
     depends_on:
       - etcd
     ports:

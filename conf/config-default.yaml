@@ -671,7 +671,8 @@ deployment:                    # Deployment configurations
 
   etcd:
     host:                         # Set etcd address(es) in the same etcd cluster.
-      - "http://192.168.8.18:2379"   # If TLS is enabled for etcd, use https://127.0.0.1:2379.
+      - "http://etcd:2379"   # If TLS is enabled for etcd, use https://127.0.0.1:2379.
+#      - "http://192.168.8.18:2379"   # If TLS is enabled for etcd, use https://127.0.0.1:2379.
     prefix: /apisix               # Set etcd prefix.
     timeout: 30                   # The timeout when connect/read/write to etcd, Set timeout in seconds.
     watch_timeout: 50             # The timeout when watch etcd

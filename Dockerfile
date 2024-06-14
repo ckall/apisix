@@ -6,9 +6,9 @@ WORKDIR /apisix
 ENV GO111MODULE=on
 ENV GOPROXY=https://goproxy.cn
 # 构建环境
-RUN yum update -y
-RUN yum install -y wget make sudo
-RUN make deps
+RUN yum update -y && \
+    yum install -y wget make sudo && \
+    make deps
 #
 #FROM production-stage:latest AS production-stage
 ##

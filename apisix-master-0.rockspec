@@ -81,7 +81,9 @@ dependencies = {
     "lua-resty-ldap = 0.1.0-0",
     "lua-resty-t1k = 1.1.3",
     "brotli-ffi = 0.3-1",
-    "lua-ffi-zlib = 0.6-0"
+    "lua-ffi-zlib = 0.6-0",
+    "lua-resty-mysql = 0.15-0",
+    "luasql-mysql = 2.6.0-3"
 }
 
 build = {

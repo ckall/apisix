@@ -463,3 +463,8 @@ ci-env-down:
 	rm $(OTEL_CONFIG)
 	$(ENV_DOCKER_COMPOSE) down
 	@$(call func_echo_success_status, "$@ -> [ Done ]")
+
+### start etcd
+.PHONY: resty-install
+resty-install:
+	$(ENV_LUAROCKS) install apisix-master-0.rockspec --tree deps --only-deps $(ENV_LUAROCKS_SERVER_OPT);

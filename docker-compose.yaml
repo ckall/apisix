@@ -1,15 +1,15 @@
-version: "3"
+version: "3.8"
 
 services:
   centos:
-#    image: production-stage:latest
+    #    image: production-stage:latest
     build:
-        context: .
-        dockerfile: Dockerfile
-        args:
-            ENV: "master"
+      context: .
+      dockerfile: Dockerfile
+      args:
+        ENV: "master"
     volumes:
-      - ./:/usr/local/apisix
+      - ./apisix:/usr/local/apisix/apisix
     depends_on:
       - etcd
     ports:
@@ -35,7 +35,6 @@ services:
     restart: always
     depends_on:
       - etcd
-      - centos
     volumes:
       - ./conf/config.dashboard.yaml:/usr/local/apisix-dashboard/conf/conf.yaml
       - ./conf/schema.json:/usr/local/apisix-dashboard/conf/schema.json

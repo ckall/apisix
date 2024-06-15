@@ -99,7 +99,7 @@ function multi_distro_installation() {
         echo "Non-supported distribution, APISIX is only supported on Linux-based systems"
         exit 1
     fi
-    install_apisix_runtime
+#    install_apisix_runtime
 }
 
 function multi_distro_uninstallation() {

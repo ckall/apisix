@@ -2,6 +2,8 @@ FROM registry.cn-hangzhou.aliyuncs.com/ckall/production-stage:latest AS producti
 #
 COPY ./ /apisix/
 #
+RUN make resty-install
+
 FROM centos:7 AS last-stage
 #
 WORKDIR /usr/local/apisix

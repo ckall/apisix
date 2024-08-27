@@ -27,11 +27,11 @@ RUN sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list && 
     libpcre3 \
     libpcre3-dev \
     libldap2-dev \
-    unzip  && \
-    make install-runtime\
+    unzip
 
 # 清理apt缓存以减小镜像体积
 RUN apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    make install-runtime\
 
 

@@ -28,8 +28,3 @@ RUN sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list && 
     libldap2-dev \
     unzip
 
-# 清理apt缓存以减小镜像体积
-RUN apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-

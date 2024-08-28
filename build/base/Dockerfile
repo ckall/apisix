@@ -1,5 +1,5 @@
 #一阶段
-FROM openresty/openresty:1.21.4.1-0-jammy  AS base
+FROM openresty/openresty:1.21.4.1-0-jammy
 ENV APT_MIRROR_URL https://mirrors.aliyun.com/ubuntu/
 ENV GO111MODULE=on
 ENV GOPROXY=https://goproxy.cn,direct

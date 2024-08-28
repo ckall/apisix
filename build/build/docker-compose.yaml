@@ -1,0 +1,10 @@
+services:
+  centos:
+#    image: production-stage:latest
+    build:
+        dockerfile: Dockerfile
+    volumes:
+      - ./:/build
+#    depends_on:
+#      - etcd
+    restart: always

@@ -26,5 +26,6 @@ RUN sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list && 
     libpcre3 \
     libpcre3-dev \
     libldap2-dev \
-    unzip
+    unzip \
+    gawk
 

@@ -48,7 +48,7 @@ ENV_INST_LUADIR        ?= $(ENV_INST_PREFIX)/share/lua/5.1
 ENV_INST_BINDIR        ?= $(ENV_INST_PREFIX)/bin
 ENV_HOMEBREW_PREFIX    ?= /usr/local
 ENV_RUNTIME_VER	     ?= $(shell $(ENV_NGINX_EXEC) version 2>&1 | tr ' ' '\n'  | grep 'APISIX_RUNTIME_VER' | cut -d '=' -f2)
-
+ENV_LUAROCKS_SERVER  =  https://luarocks.cn
 -include .requirements
 export
 
@@ -500,7 +500,17 @@ start-etcd:
 
 
 
-### start etcd
-.PHONY: resty-install
-resty-install:
-	$(ENV_LUAROCKS) install apisix-master-0.rockspec --tree deps --only-deps $(ENV_LUAROCKS_SERVER_OPT);
+### luarocks : Installing dependencies
+.PHONY: build
+build:
+	$(eval ENV_LUAROCKS_VER := $(shell $(ENV_LUAROCKS) --version | grep -E -o "luarocks [0-9]+."))
+	@if [ '$(ENV_LUAROCKS_VER)' = 'luarocks 3.' ]; then \
+		mkdir -p ~/.luarocks; \
+		$(ENV_LUAROCKS) config $(ENV_LUAROCKS_FLAG_LOCAL) variables.OPENSSL_LIBDIR $(addprefix $(ENV_OPENSSL_PREFIX), /lib); \
+		$(ENV_LUAROCKS) config $(ENV_LUAROCKS_FLAG_LOCAL) variables.OPENSSL_INCDIR $(addprefix $(ENV_OPENSSL_PREFIX), /include); \
+		[ '$(ENV_OS_NAME)' == 'darwin' ] && $(ENV_LUAROCKS) config $(ENV_LUAROCKS_FLAG_LOCAL) variables.PCRE_INCDIR $(addprefix $(ENV_PCRE_PREFIX), /include); \
+		$(ENV_LUAROCKS) install apisix-master-0.rockspec --tree deps --only-deps --server https://luarocks.cn $(ENV_LUAROCKS_SERVER_OPT); \
+	else \
+		$(call func_echo_warn_status, "WARNING: You're not using LuaRocks 3.x; please remove the luarocks and reinstall it via https://raw.githubusercontent.com/apache/apisix/master/utils/linux-install-luarocks.sh"); \
+		exit 1; \
+	fi

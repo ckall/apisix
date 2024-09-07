@@ -5,18 +5,20 @@
 ---
 local core = require("apisix.core")
 local jwt = require("resty.jwt")
---local mysql = require("resty.mysql")
 local http = require("resty.http")
+local lrucache = core.lrucache.new({
+    type = "plugin",
+    count = 10000,
+    ttl = 60 * 60,
+})
 local json = core.json
 local auth_header_key = "X-JiuZhou-Authorization"
 local auth_secret = "^chen|tian|zhen$"
 local user_info_key1 = "X-JiuZhou-Auth-Info"
 local user_info_key2 = "user"
 local plugin_name = "jiuzhou-rbac"
-local method_post = "POST"
-local path = "http://172.16.179.166:8010/v1/user/route/app"
 local log = core.log
-local version = "2.0"
+local version = "2.0.1"
 local schema = {}
 local metadata_schema = {}
 local ngx = ngx
@@ -28,6 +30,72 @@ local _M = {
     metadata_schema = metadata_schema,
 }
 
+
+local function send_auth(token, user_id, method, uri)
+    local httpc = http.new()
+    httpc:set_timeout(5 * 1000) -- 设置连接、发送、读取的总超时时间
+
+    -- 连接到指定主机
+    local ok, err = httpc:connect({
+        scheme = "http",
+        host = "open.duanju.com",
+        port = 80,
+    })
+    if not ok then
+        log.error("Failed to connect to host: ", err)
+        return nil, err
+    end
+
+    -- 设置发送和读取超时
+    httpc:set_timeouts(5000, 5000, 5000) -- connect_timeout, send_timeout, read_timeout
+
+    -- 构造请求体
+    local body = json.encode({
+        user_id = user_id,
+        method = method,
+        path = uri,
+    })
+
+    log.info("Sending request with body: ", body)
+
+    -- 发起 HTTP 请求
+    local res
+    res, err = httpc:request({
+        method = "POST",
+        path = "/v1/user/route/app",
+        body = body,
+        headers = {
+            ["Content-Type"] = "application/json",
+            ["X-JiuZhou-Authorization"] = token,
+            ["X-JiuZhou-Service"] = "AuthSSO",
+        }
+    })
+    if err then
+        log.error("Failed to send data: ", err)
+        httpc:close()
+        return nil, err
+    end
+    -- 读取响应体
+    local res_body, read_err = res:read_body()
+    if read_err then
+        log.error("Failed to read response body: ", read_err)
+        httpc:close()
+        return nil, read_err
+    end
+    -- 使用 keepalive 以便重用连接
+    local ok, keepalive_err = httpc:set_keepalive(60000, 10)
+    if not ok then
+        log.error("Failed to set keepalive: ", keepalive_err)
+        httpc:close()
+        return nil, keepalive_err
+    end
+
+    return {
+        status = res.status,
+        body = res_body
+    }, nil
+end
+
 --检查配置文件
 function _M.check_schema(conf, schema_type)
     if schema_type == core.schema.TYPE_METADATA then
@@ -36,81 +104,65 @@ function _M.check_schema(conf, schema_type)
     return core.schema.check(schema, conf)
 end
 
+local function verify_jwt(token)
+    local jwt_obj = jwt:verify(auth_secret, token)
+    if not jwt_obj["verified"] then
+        return nil
+    end
+    return jwt_obj.payload
+end
 --处理请求
 function _M.rewrite(conf, ctx)
     --解析jwt
     local auth_header = core.request.header(ctx, auth_header_key)
-    local jwt_obj = jwt:verify(auth_secret, auth_header)
+    -- 没有认证信息就直接跳过
+    if not auth_header then
+        return
+    end
+    local auth_data = core.lrucache.plugin_ctx(lrucache, ctx, auth_header, verify_jwt, auth_header)
     local scheme = core.request.get_scheme(ctx)
+    local method = core.request.get_method()
     local host = core.request.get_host(ctx)
-    local args = core.request.get_uri_args(ctx)
-    local post_body = core.request.get_post_args(ctx)
-    local post_body1 = core.request.get_body(0, ctx)
     local post_body2 = core.request.get_body(1024, ctx)
-    core.response.add_header("Content-Type", "application/json")
-    core.response.add_header("X-JiuZhou-Proxy", version)
-    core.response.add_header("Server", "ck_openresty")
     local uri = ctx.var.uri
     local get_args = ""
     if ctx.var.args then
         get_args = "?" .. ctx.var.args
     end
     local url = scheme .. "://" .. host .. uri .. get_args
-    if not jwt_obj["verified"] then
+    if not auth_data then
         return 401,
             {
                 message = "Missing authorization in request",
                 code = "StatusUnauthorized",
                 status = 401,
-                --metadata = {
-                --    jwt_obj = jwt_obj,
-                --    scheme = scheme,
-                --    host = host,
-                --    args = json.encode(args, true),
-                --    post_body = json.encode(post_body),
-                --    --uri = uri,
-                --    post_body1 = post_body1,
-                --    post_body2 = post_body2,
-                --    post_body = post_body,
-                --    url = url,
-                --    args = ctx.var.args,
-                --}
             }
     end
-    core.response.add_header(user_info_key1, jwt_obj.payload)
-    core.response.add_header(user_info_key2, jwt_obj.payload)
-    local user_id = jwt_obj.payload.user_id
+    core.response.add_header(user_info_key1, auth_data)
+    core.response.add_header(user_info_key2, auth_data)
+    local user_id = auth_data.user_id
     local request_method = core.request.get_method(ctx)
-    local http_link = http.new()
-    local request_body = json.encode({
-        user_id = user_id,
-        method = request_method,
-        path = uri,
-    }, true)
-    local res, err = http_link:request_uri(path, {
-        method = method_post,
-        body = request_body,
-        headers = {
-            ["Content-Type"] = "application/json",
-        }
-    })
-    if not res then
-        log.error(ngx.ERR, "Failed to make request: ", err)
-        return 500, { message = "request err1: " .. err, data = nil, code = 500, request = request_body }
+    local httpc_res, err = send_auth(auth_header, user_id, request_method, uri)
+    if err then
+        return 500, err
     end
-    if res.status ~= 200 then
-        log.error(ngx.ERR, "Failed to make request: ", res.body)
-        return res.status, res.body
+    if httpc_res.status ~= 200 then
+        return httpc_res.status, httpc_res.body
     end
-    local body
-    body, err = json.decode(res.body)
-    if body.status ~= 200 then
-        return res.status, body
+    local payload
+    payload, err = json.encode(auth_data)
+    if err then
+        log.error("json encode error: ", err)
     end
-    -- 创建http请求
+    if not post_body2 then
+        post_body2 = ""
+    end
+    log.error(string.format(
+        'jiuzhou plugins rbac log method: "%s" Host: "%s" Uri: "%s" post_body2: "%s" jwt_obj: "%s"',
+        method, host, url, post_body2, payload
+    ))
     return
 end
-
 
 local function my_timer_handler(premature, arg)
     if not premature then
@@ -119,32 +171,16 @@ local function my_timer_handler(premature, arg)
     end
 end
 
--- 记录日志
-function _M.log(conf, ctx)
-    ---- 获取url+path地址+query参数
-    local scheme = core.request.get_scheme(ctx)
-    local host = core.request.get_host(ctx)
-    local body = core.request.get_post_args(ctx)
-    if not body then
-        body = ""
-    end
-    body = json.encode(body, true)
-    local uri = ctx.var.uri
-    local get_args = ""
-    if ctx.var.args then
-        get_args = "?" .. ctx.var.args
-    end
-    local url_path = uri .. get_args
-    log.error(
-        "jiuzhou plugins rbac log",
-        " Scheme:", "\"" .. scheme .. "\"",
-        " Host:", "\"" .. host .. "\"",
-        " Uri:", "\"" .. url_path .. "\"",
-        " Body:", "\"" .. body .. "\""
-    )
-    return
+function _M.header_filter(conf, ctx)
+    core.response.add_header("Content-Type", "application/json")
+    core.response.add_header("X-JiuZhou-Proxy", version)
+    core.response.add_header("Developer", "ckallcloud@foxmail.com")
 end
 
+-- 记录日志
+--function _M.log(conf, ctx)
+--    log.error(ngx.INFO, "log: ", conf, ctx)
+--    return
+--end
+
 return _M
-
-

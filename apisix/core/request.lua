@@ -28,22 +28,22 @@ if ngx.config.subsystem == "http" then
     req_add_header = ngx_req.add_header
 end
 local is_apisix_or, a6_request = pcall(require, "resty.apisix.request")
-local ngx = ngx
-local get_headers = ngx.req.get_headers
-local clear_header = ngx.req.clear_header
-local tonumber  = tonumber
-local error     = error
-local type      = type
-local str_fmt   = string.format
-local str_lower = string.lower
-local req_read_body = ngx.req.read_body
-local req_get_body_data = ngx.req.get_body_data
-local req_get_body_file = ngx.req.get_body_file
-local req_get_post_args = ngx.req.get_post_args
-local req_get_uri_args = ngx.req.get_uri_args
-local req_set_uri_args = ngx.req.set_uri_args
-local table_insert = table.insert
-local req_set_header = ngx.req.set_header
+local ngx                      = ngx
+local get_headers              = ngx.req.get_headers
+local clear_header             = ngx.req.clear_header
+local tonumber                 = tonumber
+local error                    = error
+local type                     = type
+local str_fmt                  = string.format
+local str_lower                = string.lower
+local req_read_body            = ngx.req.read_body
+local req_get_body_data        = ngx.req.get_body_data
+local req_get_body_file        = ngx.req.get_body_file
+local req_get_post_args        = ngx.req.get_post_args
+local req_get_uri_args         = ngx.req.get_uri_args
+local req_set_uri_args         = ngx.req.set_uri_args
+local table_insert             = table.insert
+local req_set_header           = ngx.req.set_header
 
 
 local _M = {}
@@ -76,7 +76,7 @@ local function _validate_header_name(name)
     local tname = type(name)
     if tname ~= "string" then
         return nil, str_fmt("invalid header name %q: got %s, " ..
-                "expected string", name, tname)
+            "expected string", name, tname)
     end
 
     return name
@@ -154,7 +154,7 @@ local function modify_header(ctx, header_name, header_value, override)
                 if type(values) == "table" then
                     table_insert(values, header_value)
                 else
-                    ctx.headers[header_name] = {values, header_value}
+                    ctx.headers[header_name] = { values, header_value }
                 end
             end
         end
@@ -179,7 +179,6 @@ function _M.get_ip(ctx)
     return ctx.var.realip_remote_addr or ctx.var.remote_addr or ''
 end
 
-
 -- get remote address of downstream client,
 -- in cases there is a load balancer between downstream client and APISIX.
 function _M.get_remote_client_ip(ctx)
@@ -189,14 +188,12 @@ function _M.get_remote_client_ip(ctx)
     return ctx.var.remote_addr or ''
 end
 
-
 function _M.get_remote_client_port(ctx)
     if not ctx then
         ctx = ngx.ctx.api_ctx
     end
     return tonumber(ctx.var.remote_port)
 end
-
 
 function _M.get_uri_args(ctx)
     if not ctx then
@@ -213,6 +210,12 @@ function _M.get_uri_args(ctx)
     return ctx.req_uri_args
 end
 
+function _M.get_args(ctx)
+    if not ctx then
+        ctx = ngx.ctx.api_ctx
+    end
+    return ctx.var.args or ""
+end
 
 function _M.set_uri_args(ctx, args)
     if not ctx then
@@ -222,7 +225,6 @@ function _M.set_uri_args(ctx, args)
     ctx.req_uri_args = nil
     return req_set_uri_args(args)
 end
-
 
 function _M.get_post_args(ctx)
     if not ctx then
@@ -246,11 +248,10 @@ function _M.get_post_args(ctx)
     return ctx.req_post_args
 end
 
-
 local function check_size(size, max_size)
     if max_size and size > max_size then
         return nil, "request size " .. size .. " is greater than the "
-                    .. "maximum size " .. max_size .. " allowed"
+            .. "maximum size " .. max_size .. " allowed"
     end
 
     return true
@@ -302,7 +303,7 @@ function _M.get_body(max_size, ctx)
     log.info("attempt to read body from file: ", file_name)
 
     if max_size then
-        local size, err = lfs.attributes (file_name, "size")
+        local size, err = lfs.attributes(file_name, "size")
         if not size then
             return nil, err
         end
@@ -317,14 +318,12 @@ function _M.get_body(max_size, ctx)
     return req_body, err
 end
 
-
 function _M.get_scheme(ctx)
     if not ctx then
         ctx = ngx.ctx.api_ctx
     end
     return ctx.var.scheme or ''
 end
-
 
 function _M.get_host(ctx)
     if not ctx then
@@ -333,6 +332,12 @@ function _M.get_host(ctx)
     return ctx.var.host or ''
 end
 
+function _M.get_uri(ctx)
+    if not ctx then
+        ctx = ngx.ctx.api_ctx
+    end
+    return ctx.var.uri or ''
+end
 
 function _M.get_port(ctx)
     if not ctx then
@@ -340,7 +345,6 @@ function _M.get_port(ctx)
     end
     return tonumber(ctx.var.server_port)
 end
-
 
 _M.get_http_version = ngx.req.http_version
 

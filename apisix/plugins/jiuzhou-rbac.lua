@@ -9,7 +9,7 @@ local http = require("resty.http")
 local lrucache = core.lrucache.new({
     type = "plugin",
     count = 10000,
-    ttl = 60 * 60,
+    ttl = 5 * 60,
 })
 local json = core.json
 local auth_header_key = "X-JiuZhou-Authorization"
@@ -21,7 +21,6 @@ local log = core.log
 local version = "2.0.1"
 local schema = {}
 local metadata_schema = {}
-local ngx = ngx
 local _M = {
     version = version,
     name = plugin_name,
@@ -115,60 +114,42 @@ end
 function _M.rewrite(conf, ctx)
     --解析jwt
     local auth_header = core.request.header(ctx, auth_header_key)
-    -- 没有认证信息就直接跳过
+    -- 没有认证信息就直接过
+    -- 这里算是漏洞，应该返回401,但是为了兼容上一个版本(上传文件), 所以只能先这样
     if not auth_header then
         return
     end
-    local auth_data = core.lrucache.plugin_ctx(lrucache, ctx, auth_header, verify_jwt, auth_header)
-    local scheme = core.request.get_scheme(ctx)
-    local method = core.request.get_method()
-    local host = core.request.get_host(ctx)
-    local post_body2 = core.request.get_body(1024, ctx)
-    local uri = ctx.var.uri
-    local get_args = ""
-    if ctx.var.args then
-        get_args = "?" .. ctx.var.args
-    end
-    local url = scheme .. "://" .. host .. uri .. get_args
+    local auth_data = core.lrucache.plugin_ctx(lrucache, ctx, nil, verify_jwt, auth_header)
     if not auth_data then
-        return 401,
-            {
-                message = "Missing authorization in request",
-                code = "StatusUnauthorized",
-                status = 401,
-            }
+        return 401, { msg = "token is invalid", code = "StatusUnauthorized", status = 401 }
     end
-    core.response.add_header(user_info_key1, auth_data)
-    core.response.add_header(user_info_key2, auth_data)
+    local payload, err
+    payload, err = json.encode(auth_data)
+    if err then
+        log.error("json encode error: ", err)
+        return 500, err
+    end
+    ctx.jwt = payload
+    --添加请求头
+    core.request.add_header(user_info_key1, payload)
+    core.request.add_header(user_info_key2, payload)
+    local method = core.request.get_method()
+    local post_body2 = core.request.get_body(1024, ctx)
+    if not post_body2 then
+        post_body2 = ""
+    end
+    ctx.post_body = post_body2
+    local uri = core.request.get_uri(ctx)
     local user_id = auth_data.user_id
-    local request_method = core.request.get_method(ctx)
-    local httpc_res, err = send_auth(auth_header, user_id, request_method, uri)
+    local httpc_res
+    httpc_res, err = send_auth(auth_header, user_id, method, uri)
     if err then
         return 500, err
     end
     if httpc_res.status ~= 200 then
         return httpc_res.status, httpc_res.body
     end
-    local payload
-    payload, err = json.encode(auth_data)
-    if err then
-        log.error("json encode error: ", err)
-    end
-    if not post_body2 then
-        post_body2 = ""
-    end
-    log.error(string.format(
-        'jiuzhou plugins rbac log method: "%s" Host: "%s" Uri: "%s" post_body2: "%s" jwt_obj: "%s"',
-        method, host, url, post_body2, payload
-    ))
     return
-end
-
-local function my_timer_handler(premature, arg)
-    if not premature then
-        -- 在这里编写定时任务的具体逻辑
-        log.error(ngx.INFO, "定时任务执行了，参数为: ", arg)
-    end
 end
 
 function _M.header_filter(conf, ctx)
@@ -178,9 +159,23 @@ function _M.header_filter(conf, ctx)
 end
 
 -- 记录日志
---function _M.log(conf, ctx)
---    log.error(ngx.INFO, "log: ", conf, ctx)
---    return
---end
+function _M.log(conf, ctx)
+    local scheme = core.request.get_scheme(ctx)
+    local method = core.request.get_method()
+    local host = core.request.get_host(ctx)
+    local uri = core.request.get_uri(ctx)
+    local get_args = core.request.get_args(ctx)
+    local url = string.format("%s://$s%s%s", scheme, host, uri, get_args)
+    local jwt_auth = ctx.jwt
+    local route_id = ctx.route_id
+    if not jwt_auth then
+        jwt_auth = "no auth jwt"
+    end
+    log.error(string.format(
+        'jiuzhou plugins rbac log method: "%s" Host: "%s" Uri: "%s" post_body2: "%s" jwt_obj: "%s" route_id: %d',
+        method, host, url, ctx.post_body, jwt_auth, route_id
+    ))
+    return
+end
 
 return _M

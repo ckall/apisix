@@ -155,7 +155,7 @@ services:
 networks:
   apisix:
 #volumes:
-#  cloudmysql:
+##  cloudmysql:
 #    driver: local
 #  cloudredis:
 #    driver: local

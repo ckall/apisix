@@ -154,11 +154,11 @@ services:
 #      - apisix
 networks:
   apisix:
-volumes:
-  cloudmysql:
-    driver: local
-  cloudredis:
-    driver: local
+#volumes:
+#  cloudmysql:
+#    driver: local
+#  cloudredis:
+#    driver: local
 #  cloudmongo:
 #    driver: local
 #  cloudes:

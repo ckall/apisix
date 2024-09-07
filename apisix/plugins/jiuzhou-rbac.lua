@@ -5,6 +5,7 @@
 ---
 local core = require("apisix.core")
 local jwt = require("resty.jwt")
+local ngx = ngx
 local http = require("resty.http")
 local lrucache = core.lrucache.new({
     type = "plugin",
@@ -82,11 +83,11 @@ local function send_auth(token, user_id, method, uri)
         return nil, read_err
     end
     -- 使用 keepalive 以便重用连接
-    local ok, keepalive_err = httpc:set_keepalive(60000, 10)
+    ok, err = httpc:set_keepalive(60000, 10)
     if not ok then
-        log.error("Failed to set keepalive: ", keepalive_err)
+        log.error("Failed to set keepalive: ", err)
         httpc:close()
-        return nil, keepalive_err
+        return nil, err
     end
 
     return {
@@ -121,13 +122,13 @@ function _M.rewrite(conf, ctx)
     end
     local auth_data = core.lrucache.plugin_ctx(lrucache, ctx, nil, verify_jwt, auth_header)
     if not auth_data then
-        return 401, { msg = "token is invalid", code = "StatusUnauthorized", status = 401 }
+        return ngx.HTTP_UNAUTHORIZED, { msg = "token is invalid", code = "StatusUnauthorized", status = ngx.HTTP_UNAUTHORIZED }
     end
     local payload, err
     payload, err = json.encode(auth_data)
     if err then
         log.error("json encode error: ", err)
-        return 500, err
+        return ngx.HTTP_INTERNAL_SERVER_ERROR, err
     end
     ctx.jwt = payload
     --添加请求头
@@ -144,9 +145,9 @@ function _M.rewrite(conf, ctx)
     local httpc_res
     httpc_res, err = send_auth(auth_header, user_id, method, uri)
     if err then
-        return 500, err
+        return ngx.HTTP_INTERNAL_SERVER_ERROR, err
     end
-    if httpc_res.status ~= 200 then
+    if httpc_res.status ~= ngx.HTTP_OK then
         return httpc_res.status, httpc_res.body
     end
     return

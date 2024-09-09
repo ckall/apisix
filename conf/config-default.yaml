@@ -32,7 +32,7 @@ apisix:
   enable_reuseport: true       # If true, enable nginx SO_REUSEPORT option.
   show_upstream_status_in_response_header: false  # If true, include the upstream HTTP status code in
     # the response header `X-APISIX-Upstream-Status`.
-    # If false, show `X-APISIX-Upstream-Status` only if
+  # If false, show `X-APISIX-Upstream-Status` only if
   # the upstream response code is 5xx.
   enable_ipv6: true
 
@@ -69,7 +69,7 @@ apisix:
 
   router:
     http: radixtree_host_uri    # radixtree_host_uri: match route by host and URI
-      # radixtree_uri: match route by URI
+    # radixtree_uri: match route by URI
     # radixtree_uri_with_parameter: similar to radixtree_uri but match URI with parameters. See https://github.com/api7/lua-resty-radixtree/#parameters-in-path for more details.
     ssl: radixtree_sni          # radixtree_sni: match route by SNI
 
@@ -100,12 +100,12 @@ apisix:
           # - ip: 127.0.0.3                           # If not set, default to `0.0.0.0`.
           #   port: 9445
           #   enable_http2: true
-          # ssl_trusted_certificate: /path/to/ca-cert   # Set the path to CA certificates used to verify client
+        # ssl_trusted_certificate: /path/to/ca-cert   # Set the path to CA certificates used to verify client
         # certificates in the PEM format.
     ssl_protocols: TLSv1.2 TLSv1.3                # TLS versions supported.
     ssl_ciphers: ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384
     ssl_session_tickets: false  # If true, session tickets are used for SSL/TLS connections.
-      # Disabled by default because it renders Perfect Forward Secrecy (FPS)
+    # Disabled by default because it renders Perfect Forward Secrecy (FPS)
     # useless. See https://github.com/mozilla/server-side-tls/issues/135.
 
     key_encrypt_salt: # This field is only used to encrypt the private key of SSL.
@@ -115,7 +115,7 @@ apisix:
         # CAUTION: If you would like to update the key, add the new key as the
         # first item in the array and keep the older keys below the newly added
         # key, so that data can be decrypted with the older keys and encrypted
-        # with the new key. Removing the old keys directly can render the data
+      # with the new key. Removing the old keys directly can render the data
       # unrecoverable.
 
     # fallback_sni: "my.default.domain"      # Fallback SNI to be used if the client does not send SNI during
@@ -136,7 +136,7 @@ apisix:
         # CAUTION: If you would like to update the key, add the new key as the
         # first item in the array and keep the older keys below the newly added
         # key, so that data can be decrypted with the older keys and encrypted
-        # with the new key. Removing the old keys directly can render the data
+      # with the new key. Removing the old keys directly can render the data
       # unrecoverable.
 
   events: # Event distribution module configuration
@@ -151,11 +151,11 @@ nginx_config: # Config for render the template to generate nginx.conf
   error_log_level: error          # Logging level: info, debug, notice, warn, error, crit, alert, or emerg.
   worker_processes: auto          # Automatically determine the optimal number of worker processes based
     # on the available system resources.
-    # If you want use multiple cores in container, you can inject the number of
+  # If you want use multiple cores in container, you can inject the number of
   # CPU cores as environment variable "APISIX_WORKER_PROCESSES".
   enable_cpu_affinity: false      # Disable CPU affinity by default as worker_cpu_affinity affects the
     # behavior of APISIX in containers. For example, multiple instances could
-    # be bound to one CPU core, which is not desirable.
+  # be bound to one CPU core, which is not desirable.
   # If APISIX is deployed on a physical machine, CPU affinity can be enabled.
   worker_rlimit_nofile: 20480     # The number of files a worker process can open.
   # The value should be larger than worker_connections.
@@ -164,7 +164,7 @@ nginx_config: # Config for render the template to generate nginx.conf
   max_pending_timers: 16384       # The maximum number of pending timers that can be active at any given time.
   # Error "too many pending timers" indicates the threshold is reached.
   max_running_timers: 4096        # The maximum number of running timers that can be active at any given time.
-    # Error "lua_max_running_timers are not enough" error indicates the
+  # Error "lua_max_running_timers are not enough" error indicates the
   # threshold is reached.
 
   event:
@@ -230,7 +230,7 @@ nginx_config: # Config for render the template to generate nginx.conf
     client_body_timeout: 60s            # Set the maximum time waiting for client to send the request body.
     client_max_body_size: 10G             # Set the maximum allowed size of the client request body.
       # Default to 0, unlimited.
-      # Unlike Nginx, APISIX does not limit the body size by default.
+    # Unlike Nginx, APISIX does not limit the body size by default.
     # If exceeded, the 413 (Request Entity Too Large) error is returned.
     send_timeout: 10s   # Set the maximum time for transmitting a response to the client before closing.
     underscores_in_headers: "on"  # Allow HTTP request headers to contain underscores in their names.
@@ -245,14 +245,14 @@ nginx_config: # Config for render the template to generate nginx.conf
 
     proxy_ssl_server_name: true   # Send the server name in the SNI extension when establishing an SSL/TLS
       # connection with the upstream server, allowing the upstream server to
-      # select the appropriate SSL/TLS certificate and configuration based on
+    # select the appropriate SSL/TLS certificate and configuration based on
     # the requested server name.
 
     upstream:
       keepalive: 320              # Set the maximum time of keep-alive connections to the upstream servers.
       # When the value is exceeded, the least recently used connection is closed.
       keepalive_requests: 1000    # Set the maximum number of requests that can be served through one
-        # keep-alive connection.
+      # keep-alive connection.
       # After the maximum number of requests is made, the connection is closed.
       keepalive_timeout: 60s      # Set the maximum time for which TCP connection keeps alive.
     charset: utf-8                # Add the charset to the "Content-Type" response header field.
@@ -616,7 +616,7 @@ plugin_attr: # Plugin attributes
     # Maximum: 86400. Minimum: 3.
   dubbo-proxy: # Plugin: dubbo-proxy
     upstream_multiplex_count: 32      # Set the maximum number of connections that can be multiplexed over
-      # a single network connection between the Dubbo Proxy and the upstream
+    # a single network connection between the Dubbo Proxy and the upstream
     # Dubbo services.
   proxy-mirror: # Plugin: proxy-mirror
     timeout: # Set the timeout for mirrored requests.
@@ -628,7 +628,7 @@ plugin_attr: # Plugin attributes
   inspect: # Plugin: inspect
     delay: 3                          # Set the delay in seconds for the frequency of checking the hooks file.
     hooks_file: "/usr/local/apisix/plugin_inspect_hooks.lua"  # Set the path to the Lua file that defines
-      # hooks. Only administrators should have
+    # hooks. Only administrators should have
     # write access to this file for security.
   zipkin: # Plugin: zipkin
     set_ngx_var: false                # export zipkin variables to nginx variables
@@ -656,13 +656,13 @@ deployment: # Deployment configurations
 
     enable_admin_cors: true       # Enable Admin API CORS response header `Access-Control-Allow-Origin`.
       #    allow_admin:                  # Limit Admin API access by IP addresses.
-      #      - 127.0.0.0/24              # If not set, any IP address is allowed.
+    #      - 127.0.0.0/24              # If not set, any IP address is allowed.
     # - "::/64"
     admin_listen: # Set the Admin API listening addresses.
       ip: 0.0.0.0                 # Set listening IP.
       port: 9180                  # Set listening port. Beware of port conflict with node_listen.
 
-        # https_admin: true           # Enable SSL for Admin API on IP and port specified in admin_listen.
+      # https_admin: true           # Enable SSL for Admin API on IP and port specified in admin_listen.
       # Use admin_api_mtls.admin_ssl_cert and admin_api_mtls.admin_ssl_cert_key.
     # admin_api_mtls:             # Set this if `https_admin` is true.
     #   admin_ssl_cert: ""        # Set path to SSL/TLS certificate.
@@ -673,14 +673,14 @@ deployment: # Deployment configurations
 
   etcd:
     host: # Set etcd address(es) in the same etcd cluster.
-      #      - "http://etcd:2379"   # If TLS is enabled for etcd, use https://127.0.0.1:2379.
-      - "http://172.16.179.206:2379"   # If TLS is enabled for etcd, use https://127.0.0.1:2379.
+      - "http://etcd:2379"   # If TLS is enabled for etcd, use https://127.0.0.1:2379.
+    #      - "http://172.16.179.206:2379"   # If TLS is enabled for etcd, use https://127.0.0.1:2379.
     prefix: /apisix/test              # Set etcd prefix.
     timeout: 30                   # The timeout when connect/read/write to etcd, Set timeout in seconds.
     watch_timeout: 50             # The timeout when watch etcd
       # resync_delay: 5             # Set resync time in seconds after a sync failure.
       # The actual resync time would be resync_delay plus 50% random jitter.
-      # health_check_timeout: 10    # Set timeout in seconds for etcd health check.
+    # health_check_timeout: 10    # Set timeout in seconds for etcd health check.
     # Default to 10 if not set or a negative value is provided.
     startup_retry: 2              # Set the number of retries to etcd on startup. Default to 2.
     # user: root                  # Set the root username for etcd.
@@ -689,5 +689,5 @@ deployment: # Deployment configurations
       # cert: /path/to/cert       # Set the path to certificate used by the etcd client
       # key: /path/to/key         # Set the path to path of key used by the etcd client
       verify: true                # Verify the etcd certificate when establishing a TLS connection with etcd.
-        # sni:                      # The SNI for etcd TLS requests.
+      # sni:                      # The SNI for etcd TLS requests.
       # If not set, the host from the URL is used.

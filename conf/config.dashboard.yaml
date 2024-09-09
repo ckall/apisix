@@ -23,8 +23,8 @@ conf:
     - 0.0.0.0/0
   etcd:
     endpoints: # supports defining multiple etcd host addresses for an etcd cluster
-      #      - "http://etcd:2379"
-      - "http://172.16.179.206:2379"   # If TLS is enabled for etcd, use https://127.0.0.1:2379.
+      - "http://etcd:2379"
+    #      - "http://172.16.179.206:2379"   # If TLS is enabled for etcd, use https://127.0.0.1:2379.
     prefix: "/apisix/test"
     timeout: 30
     # username: "root"    # ignore etcd username if not enable etcd auth

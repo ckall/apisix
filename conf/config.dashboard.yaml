@@ -23,8 +23,9 @@ conf:
     - 0.0.0.0/0
   etcd:
     endpoints: # supports defining multiple etcd host addresses for an etcd cluster
-      - "http://etcd:2379"
-    prefix: "/apisix"
+      #      - "http://etcd:2379"
+      - "http://172.16.179.206:2379"   # If TLS is enabled for etcd, use https://127.0.0.1:2379.
+    prefix: "/apisix/test"
     timeout: 30
     # username: "root"    # ignore etcd username if not enable etcd auth
     # password: "123456"  # ignore etcd password if not enable etcd auth
@@ -112,7 +113,7 @@ plugins: # plugin list (sorted in alphabetical order)
   #  - degraphql                      # priority: 509
   #  - kafka-proxy                    # priority: 508
   #  - dubbo-proxy                   # priority: 507
-#  - grpc-transcode                 # priority: 506
+  #  - grpc-transcode                 # priority: 506
   #  - grpc-web                       # priority: 505
   #  - public-api                     # priority: 501
   - prometheus                     # priority: 500

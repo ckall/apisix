@@ -74,7 +74,7 @@ end
 
 local load_balancer
 local local_conf
-local ver_header = "APISIX/" .. core.version.VERSION
+local ver_header = "ckallcloud/" .. core.version.VERSION
 
 local has_mod, apisix_ngx_client = pcall(require, "resty.apisix.client")
 
@@ -82,6 +82,8 @@ local _M = {version = 0.4}
 
 
 function _M.http_init(args)
+    core.log.error("http_init")
+
     core.resolver.init_resolver(args)
     core.id.init()
     core.env.init()
@@ -104,6 +106,8 @@ end
 
 
 function _M.http_init_worker()
+    core.log.error("http_init_worker")
+
     local seed, err = core.utils.get_seed_from_urandom()
     if not seed then
         core.log.warn('failed to get seed from urandom: ', err)
@@ -164,6 +168,8 @@ end
 
 
 function _M.http_exit_worker()
+    core.log.error("http_exit_worker")
+
     -- TODO: we can support stream plugin later - currently there is not `destroy` method
     -- in stream plugins
     plugin.exit_worker()

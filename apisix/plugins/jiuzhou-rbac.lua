@@ -7,6 +7,8 @@ local core = require("apisix.core")
 local jwt = require("resty.jwt")
 local ngx = ngx
 local http = require("resty.http")
+local redis_new = require("resty.redis").new
+
 local lrucache = core.lrucache.new({
     type = "plugin",
     count = 10000,
@@ -30,6 +32,72 @@ local _M = {
     metadata_schema = metadata_schema,
 }
 
+--redis_cli
+--local red, err = redis_cli({
+--    redis_host = "redis",
+--    redis_database = 1,
+--})
+--if not red then
+--    log.error("Failed to connect to redis: ", err)
+--end
+--local red_res1, err = red:set("test", "test")
+--if err then
+--    log.error("Failed to set value in redis1: ", err, red_res1)
+--    return 500, err
+--end
+--local red_res, err = red:get("test")
+--if err then
+--    log.error("Failed to set value in redis2: ", err)
+--    return 500, err
+--end
+--if red_res then
+--    log.info("Successfully set value in redis2: ", red_res)
+--    return
+--end
+local function redis_cli(conf)
+    local red = redis_new()
+    local timeout = conf.redis_timeout or 1000 -- 1sec
+
+    red:set_timeouts(timeout, timeout, timeout)
+
+    local sock_opts = {
+        ssl = conf.redis_ssl,
+        ssl_verify = conf.redis_ssl_verify
+    }
+
+    local ok, err = red:connect(conf.redis_host, conf.redis_port or 6379, sock_opts)
+    if not ok then
+        return false, err
+    end
+
+    local count
+    count, err = red:get_reused_times()
+    if 0 == count then
+        if conf.redis_password and conf.redis_password ~= '' then
+            local ok, err
+            if conf.redis_username then
+                ok, err = red:auth(conf.redis_username, conf.redis_password)
+            else
+                ok, err = red:auth(conf.redis_password)
+            end
+            if not ok then
+                return nil, err
+            end
+        end
+
+        -- select db
+        if conf.redis_database ~= 0 then
+            local ok, err = red:select(conf.redis_database)
+            if not ok then
+                return false, "failed to change redis db, err: " .. err
+            end
+        end
+    elseif err then
+        -- core.log.info(" err: ", err)
+        return nil, err
+    end
+    return red, nil
+end
 
 local function send_auth(token, user_id, method, uri)
     local httpc = http.new()
@@ -105,12 +173,28 @@ function _M.check_schema(conf, schema_type)
 end
 
 local function verify_jwt(token)
+    ngx.thread.spawn()
     local jwt_obj = jwt:verify(auth_secret, token)
     if not jwt_obj["verified"] then
         return nil
     end
     return jwt_obj.payload
 end
+
+-- response
+-- 如果返回的是一个table就按照table的格式输出
+-- 如果返回的是一个string就按照msg = msg的格式输出
+local function response(code, msg)
+    if type(msg) == "string" then
+        msg = { msg = msg, code = code }
+    end
+    -- 认证需要这种格式
+    if code == ngx.HTTP_UNAUTHORIZED then
+        msg = { msg = "token is invalid", code = "StatusUnauthorized", status = ngx.HTTP_UNAUTHORIZED }
+    end
+    return code, msg
+end
+
 --处理请求
 function _M.rewrite(conf, ctx)
     --解析jwt
@@ -122,13 +206,13 @@ function _M.rewrite(conf, ctx)
     end
     local auth_data = core.lrucache.plugin_ctx(lrucache, ctx, nil, verify_jwt, auth_header)
     if not auth_data then
-        return ngx.HTTP_UNAUTHORIZED, { msg = "token is invalid", code = "StatusUnauthorized", status = ngx.HTTP_UNAUTHORIZED }
+        return response(ngx.HTTP_UNAUTHORIZED)
     end
     local payload, err
     payload, err = json.encode(auth_data)
     if err then
         log.error("json encode error: ", err)
-        return ngx.HTTP_INTERNAL_SERVER_ERROR, err
+        return response(ngx.HTTP_INTERNAL_SERVER_ERROR, err)
     end
     ctx.jwt = payload
     --添加请求头
@@ -145,10 +229,10 @@ function _M.rewrite(conf, ctx)
     local httpc_res
     httpc_res, err = send_auth(auth_header, user_id, method, uri)
     if err then
-        return ngx.HTTP_INTERNAL_SERVER_ERROR, err
+        return response(ngx.HTTP_INTERNAL_SERVER_ERROR, err)
     end
     if httpc_res.status ~= ngx.HTTP_OK then
-        return httpc_res.status, httpc_res.body
+        return response(httpc_res.status, httpc_res.body)
     end
     return
 end

@@ -1,4 +1,4 @@
-FROM registry.cn-hangzhou.aliyuncs.com/ckall/gatewaybuild:latest
+FROM 172.16.179.159/jiuzhou/gatewaybuild:1.1
 
 WORKDIR /usr/local/apisix
 COPY  ./ /usr/local/apisix/

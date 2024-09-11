@@ -18,35 +18,20 @@ services:
     restart: always
 
   etcd:
-    image: bitnami/etcd:latest
+    image: registry.cn-hangzhou.aliyuncs.com/zhen202407/etcd:latest
     ports:
       - "2380:2380"
       - "2379:2379"
     networks:
       - apisix
     volumes:
-      - ./etcd:/bitnami/etcd/data
+      - /data/etcd:/opt/bitnami/etcd/data
     environment:
       ETCD_ENABLE_V2: "true"
       ALLOW_NONE_AUTHENTICATION: "yes"
-      ETCD_ADVERTISE_CLIENT_URLS: "http://etcd:2379"
+      ETCD_ADVERTISE_CLIENT_URLS: "http://172.16.179.206:2379,http://etcd:2379"
       ETCD_LISTEN_CLIENT_URLS: "http://0.0.0.0:2379"
-      ETCD_SNAPSHOTS_DIR: "/bitnami/etcd/data"
     restart: always
-
-  dashboard:
-    image: apache/apisix-dashboard:3.0.1-alpine
-    depends_on:
-      - etcd
-    networks:
-      - apisix
-    volumes:
-      - ./conf/config.dashboard.yaml:/usr/local/apisix-dashboard/conf/conf.yaml
-      - ./conf/schema.json:/usr/local/apisix-dashboard/conf/schema.json
-    ports:
-      - "9002:9000"
-    restart: always
-
 
   etcdkeeper:
     image: evildecay/etcdkeeper
@@ -58,6 +43,17 @@ services:
       - etcd
     restart: always
 
+
+  dashboard:
+    image: registry.cn-hangzhou.aliyuncs.com/zhen202407/apisix-dashboard:3.0.1-alpine
+    networks:
+      - apisix
+    volumes:
+      - ./conf/config.dashboard.yaml:/usr/local/apisix-dashboard/conf/conf.yaml
+      - ./conf/schema.json:/usr/local/apisix-dashboard/conf/schema.json
+    ports:
+      - "9002:9000"
+    restart: always
 #
 ## 分割线
 #  mysql:

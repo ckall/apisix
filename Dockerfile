@@ -3,7 +3,7 @@ FROM 172.16.179.159/jiuzhou/gatewaybuild:1.1
 WORKDIR /usr/local/apisix
 COPY  ./ /usr/local/apisix/
 
-RUN toutch make build
+RUN make build
 #
 EXPOSE 9080 9443
 # forward request and error logs to docker log collector

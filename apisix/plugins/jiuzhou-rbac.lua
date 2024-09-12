@@ -214,6 +214,8 @@ end
 --- @param ctx table
 --- @return number,table
 function _M.rewrite(_, ctx)
+    core.response.add_header("X-JiuZhou-Proxy1", version)
+
     --解析jwt
     local auth_header = core.request.header(ctx, auth_header_key)
     -- 没有认证信息就直接过
@@ -252,7 +254,6 @@ function _M.rewrite(_, ctx)
     if httpc_res.status ~= ngx.HTTP_OK then
         return response(httpc_res.status, httpc_res.body)
     end
-    core.response.add_header("X-JiuZhou-Proxy1", version)
     return
 end
 

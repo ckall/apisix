@@ -251,6 +251,7 @@ function _M.rewrite(_, ctx)
     if httpc_res.status ~= ngx.HTTP_OK then
         return response(httpc_res.status, httpc_res.body)
     end
+    core.response.add_header("X-JiuZhou-Proxy1", version)
     return
 end
 
@@ -260,7 +261,7 @@ end
 --- @param ctx table
 --- @return void
 function _M.header_filter(_, _)
-    core.response.add_header("Content-Type", "application/json")
+    --core.response.add_header("Content-Type", "application/json")
     core.response.add_header("X-JiuZhou-Proxy", version)
     core.response.add_header("Developer", "ckallcloud@foxmail.com")
 end

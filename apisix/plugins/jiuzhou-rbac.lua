@@ -6,9 +6,12 @@
 local core = require("apisix.core")
 local jwt = require("resty.jwt")
 local ngx = ngx
-local http = require("resty.http")
-local redis_new = require("resty.redis").new
-
+local httpc = require("resty.http").new()
+local red = require("resty.redis").new()
+--local kafka = require("resty.kafka.producer")
+--local kafka_lrucache = core.lrucache.new({
+--    type = "plugin",
+--})
 local lrucache = core.lrucache.new({
     type = "plugin",
     count = 10000,
@@ -21,6 +24,7 @@ local user_info_key1 = "X-JiuZhou-Auth-Info"
 local user_info_key2 = "user"
 local plugin_name = "jiuzhou-rbac"
 local log = core.log
+local permission_addr = "172.16.179.166"
 local version = "2.0.1"
 local schema = {}
 local metadata_schema = {}
@@ -54,8 +58,10 @@ local _M = {
 --    log.info("Successfully set value in redis2: ", red_res)
 --    return
 --end
+--- 获取redis
+--- @param conf table
+--- @return table, string
 local function redis_cli(conf)
-    local red = redis_new()
     local timeout = conf.redis_timeout or 1000 -- 1sec
 
     red:set_timeouts(timeout, timeout, timeout)
@@ -74,7 +80,6 @@ local function redis_cli(conf)
     count, err = red:get_reused_times()
     if 0 == count then
         if conf.redis_password and conf.redis_password ~= '' then
-            local ok, err
             if conf.redis_username then
                 ok, err = red:auth(conf.redis_username, conf.redis_password)
             else
@@ -87,26 +92,30 @@ local function redis_cli(conf)
 
         -- select db
         if conf.redis_database ~= 0 then
-            local ok, err = red:select(conf.redis_database)
+            ok, err = red:select(conf.redis_database)
             if not ok then
                 return false, "failed to change redis db, err: " .. err
             end
         end
     elseif err then
-        -- core.log.info(" err: ", err)
         return nil, err
     end
     return red, nil
 end
 
+--- 获取用户信息
+--- @overload fun(token:string, user_id:number, method:string, uri:string): table, string
+--- @param token string
+--- @param user_id number
+--- @param method string
+--- @param uri string
+--- @return table,string
 local function send_auth(token, user_id, method, uri)
-    local httpc = http.new()
     httpc:set_timeout(5 * 1000) -- 设置连接、发送、读取的总超时时间
-
     -- 连接到指定主机
     local ok, err = httpc:connect({
         scheme = "http",
-        host = "open.duanju.com",
+        host = permission_addr,
         port = 80,
     })
     if not ok then
@@ -118,14 +127,11 @@ local function send_auth(token, user_id, method, uri)
     httpc:set_timeouts(5000, 5000, 5000) -- connect_timeout, send_timeout, read_timeout
 
     -- 构造请求体
-    local body = json.encode({
+    local body = {
         user_id = user_id,
         method = method,
         path = uri,
-    })
-
-    log.info("Sending request with body: ", body)
-
+    }
     -- 发起 HTTP 请求
     local res
     res, err = httpc:request({
@@ -134,8 +140,8 @@ local function send_auth(token, user_id, method, uri)
         body = body,
         headers = {
             ["Content-Type"] = "application/json",
-            ["X-JiuZhou-Authorization"] = token,
-            ["X-JiuZhou-Service"] = "AuthSSO",
+            --["X-JiuZhou-Authorization"] = token,
+            --["X-JiuZhou-Service"] = "AuthSSO",
         }
     })
     if err then
@@ -172,8 +178,10 @@ function _M.check_schema(conf, schema_type)
     return core.schema.check(schema, conf)
 end
 
+--- This function returns `table`.
+--- @param token string
+--- @return table|nil
 local function verify_jwt(token)
-    ngx.thread.spawn()
     local jwt_obj = jwt:verify(auth_secret, token)
     if not jwt_obj["verified"] then
         return nil
@@ -181,9 +189,13 @@ local function verify_jwt(token)
     return jwt_obj.payload
 end
 
--- response
--- 如果返回的是一个table就按照table的格式输出
--- 如果返回的是一个string就按照msg = msg的格式输出
+--- response
+--- 如果返回的是一个table就按照table的格式输出
+--- 如果返回的是一个string就按照msg = msg的格式输出
+--- @overload fun(code:number, msg:string):number, table
+--- @param code number
+--- @param msg string|table
+--- @return number, table
 local function response(code, msg)
     if type(msg) == "string" then
         msg = { msg = msg, code = code }
@@ -195,8 +207,12 @@ local function response(code, msg)
     return code, msg
 end
 
---处理请求
-function _M.rewrite(conf, ctx)
+--- 处理请求
+--- @overload fun(conf:table, ctx:table):number
+--- @param conf table
+--- @param ctx table
+--- @return number,table
+function _M.rewrite(_, ctx)
     --解析jwt
     local auth_header = core.request.header(ctx, auth_header_key)
     -- 没有认证信息就直接过
@@ -231,20 +247,28 @@ function _M.rewrite(conf, ctx)
     if err then
         return response(ngx.HTTP_INTERNAL_SERVER_ERROR, err)
     end
+
     if httpc_res.status ~= ngx.HTTP_OK then
         return response(httpc_res.status, httpc_res.body)
     end
     return
 end
 
-function _M.header_filter(conf, ctx)
+--- 发送认证请求
+--- @overload  fun(conf:table, ctx:table):void
+--- @param conf table
+--- @param ctx table
+--- @return void
+function _M.header_filter(_, _)
     core.response.add_header("Content-Type", "application/json")
     core.response.add_header("X-JiuZhou-Proxy", version)
     core.response.add_header("Developer", "ckallcloud@foxmail.com")
 end
 
 -- 记录日志
-function _M.log(conf, ctx)
+--- @overload fun(conf:table, ctx:table):void
+function _M.log(_, ctx)
+
     local scheme = core.request.get_scheme(ctx)
     local method = core.request.get_method()
     local host = core.request.get_host(ctx)
@@ -260,6 +284,10 @@ function _M.log(conf, ctx)
         'jiuzhou plugins rbac log method: "%s" Host: "%s" Uri: "%s" post_body2: "%s" jwt_obj: "%s" route_id: %d',
         method, host, url, ctx.post_body, jwt_auth, route_id
     ))
+    -- 发送到kafka,clickhourse,mysql,mongo,redis没想好?...
+
+
+
     return
 end
 

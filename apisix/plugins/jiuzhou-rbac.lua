@@ -25,6 +25,7 @@ local user_info_key2 = "user"
 local plugin_name = "jiuzhou-rbac"
 local log = core.log
 local permission_addr = "172.16.179.166"
+local permission_port = 9010
 local version = "2.0.2"
 local schema = {}
 local metadata_schema = {}
@@ -116,7 +117,7 @@ local function send_auth(token, user_id, method, uri)
     local ok, err = httpc:connect({
         scheme = "http",
         host = permission_addr,
-        port = 80,
+        port = permission_port,
     })
     if not ok then
         log.error("Failed to connect to host: ", err)
@@ -260,7 +261,7 @@ end
 --- @param conf table
 --- @param ctx table
 --- @return void
-function _M.header_filter(_, _)
+function _M.header_filter(conf, ctx)
     --core.response.add_header("Content-Type", "application/json")
     core.response.add_header("X-JiuZhou-Proxy", version)
     core.response.add_header("Developer", "ckallcloud@foxmail.com")
@@ -268,8 +269,7 @@ end
 
 -- 记录日志
 --- @overload fun(conf:table, ctx:table):void
-function _M.log(_, ctx)
-
+function _M.log(conf, ctx)
     local scheme = core.request.get_scheme(ctx)
     local method = core.request.get_method()
     local host = core.request.get_host(ctx)

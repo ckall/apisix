@@ -7,7 +7,7 @@ local core = require("apisix.core")
 local jwt = require("resty.jwt")
 local ngx = ngx
 local httpc = require("resty.http").new()
-local red = require("resty.redis").new()
+--local red = require("resty.redis").new()
 --local kafka = require("resty.kafka.producer")
 --local kafka_lrucache = core.lrucache.new({
 --    type = "plugin",
@@ -62,47 +62,47 @@ local _M = {
 --- 获取redis
 --- @param conf table
 --- @return table, string
-local function redis_cli(conf)
-    local timeout = conf.redis_timeout or 1000 -- 1sec
-
-    red:set_timeouts(timeout, timeout, timeout)
-
-    local sock_opts = {
-        ssl = conf.redis_ssl,
-        ssl_verify = conf.redis_ssl_verify
-    }
-
-    local ok, err = red:connect(conf.redis_host, conf.redis_port or 6379, sock_opts)
-    if not ok then
-        return false, err
-    end
-
-    local count
-    count, err = red:get_reused_times()
-    if 0 == count then
-        if conf.redis_password and conf.redis_password ~= '' then
-            if conf.redis_username then
-                ok, err = red:auth(conf.redis_username, conf.redis_password)
-            else
-                ok, err = red:auth(conf.redis_password)
-            end
-            if not ok then
-                return nil, err
-            end
-        end
-
-        -- select db
-        if conf.redis_database ~= 0 then
-            ok, err = red:select(conf.redis_database)
-            if not ok then
-                return false, "failed to change redis db, err: " .. err
-            end
-        end
-    elseif err then
-        return nil, err
-    end
-    return red, nil
-end
+--local function redis_cli(conf)
+--    local timeout = conf.redis_timeout or 1000 -- 1sec
+--
+--    red:set_timeouts(timeout, timeout, timeout)
+--
+--    local sock_opts = {
+--        ssl = conf.redis_ssl,
+--        ssl_verify = conf.redis_ssl_verify
+--    }
+--
+--    local ok, err = red:connect(conf.redis_host, conf.redis_port or 6379, sock_opts)
+--    if not ok then
+--        return false, err
+--    end
+--
+--    local count
+--    count, err = red:get_reused_times()
+--    if 0 == count then
+--        if conf.redis_password and conf.redis_password ~= '' then
+--            if conf.redis_username then
+--                ok, err = red:auth(conf.redis_username, conf.redis_password)
+--            else
+--                ok, err = red:auth(conf.redis_password)
+--            end
+--            if not ok then
+--                return nil, err
+--            end
+--        end
+--
+--        -- select db
+--        if conf.redis_database ~= 0 then
+--            ok, err = red:select(conf.redis_database)
+--            if not ok then
+--                return false, "failed to change redis db, err: " .. err
+--            end
+--        end
+--    elseif err then
+--        return nil, err
+--    end
+--    return red, nil
+--end
 
 --- 获取用户信息
 --- @overload fun(token:string, user_id:number, method:string, uri:string): table, string

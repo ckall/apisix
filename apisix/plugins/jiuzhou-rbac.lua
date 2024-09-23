@@ -114,11 +114,7 @@ local _M = {
 local function send_auth(user_id, method, uri)
     httpc:set_timeout(5 * 1000) -- 设置连接、发送、读取的总超时时间
     -- 连接到指定主机
-    local ok, err = httpc:connect({
-        scheme = "http",
-        host = permission_addr,
-        port = permission_port,
-    })
+    local ok, err = httpc:connect(permission_addr, permission_port)
     if not ok then
         log.error("Failed to connect to host: ", err)
         return nil, err

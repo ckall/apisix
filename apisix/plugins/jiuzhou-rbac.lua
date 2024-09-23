@@ -111,7 +111,7 @@ local _M = {
 --- @param method string
 --- @param uri string
 --- @return table,string
-local function send_auth(token, user_id, method, uri)
+local function send_auth(user_id, method, uri)
     httpc:set_timeout(5 * 1000) -- 设置连接、发送、读取的总超时时间
     -- 连接到指定主机
     local ok, err = httpc:connect({
@@ -133,23 +133,26 @@ local function send_auth(token, user_id, method, uri)
         method = method,
         path = uri,
     }
+
+    -- 将请求体转换为 JSON 字符串
+    local body_json = json.encode(body)
+
     -- 发起 HTTP 请求
     local res
     res, err = httpc:request({
         method = "POST",
         path = "/v1/user/route/app",
-        body = body,
+        body = body_json, -- 使用 JSON 字符串作为请求体
         headers = {
             ["Content-Type"] = "application/json",
-            --["X-JiuZhou-Authorization"] = token,
-            --["X-JiuZhou-Service"] = "AuthSSO",
         }
     })
-    if err then
+    if not res then
         log.error("Failed to send data: ", err)
         httpc:close()
         return nil, err
     end
+
     -- 读取响应体
     local res_body, read_err = res:read_body()
     if read_err then
@@ -157,6 +160,7 @@ local function send_auth(token, user_id, method, uri)
         httpc:close()
         return nil, read_err
     end
+
     -- 使用 keepalive 以便重用连接
     ok, err = httpc:set_keepalive(60000, 10)
     if not ok then
@@ -214,8 +218,6 @@ end
 --- @param ctx table
 --- @return number,table
 function _M.rewrite(_, ctx)
-    core.response.add_header("X-JiuZhou-Proxy1", version)
-
     --解析jwt
     local auth_header = core.request.header(ctx, auth_header_key)
     -- 没有认证信息就直接过
@@ -246,7 +248,7 @@ function _M.rewrite(_, ctx)
     local uri = core.request.get_uri(ctx)
     local user_id = auth_data.user_id
     local httpc_res
-    httpc_res, err = send_auth(auth_header, user_id, method, uri)
+    httpc_res, err = send_auth(user_id, method, uri)
     if err then
         return response(ngx.HTTP_INTERNAL_SERVER_ERROR, err)
     end
@@ -263,7 +265,7 @@ end
 --- @param ctx table
 --- @return void
 function _M.header_filter(conf, ctx)
-    --core.response.add_header("Content-Type", "application/json")
+    core.response.add_header("Content-Type", "application/json")
     core.response.add_header("X-JiuZhou-Proxy", version)
     core.response.add_header("Developer", "ckallcloud@foxmail.com")
 end

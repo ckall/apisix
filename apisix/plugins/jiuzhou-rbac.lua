@@ -246,7 +246,7 @@ function _M.rewrite(_, ctx)
     end
 
     if httpc_res.status ~= ngx.HTTP_OK then
-        return response(httpc_res.status, httpc_res.body)
+        return httpc_res.status, httpc_res.body
     end
     return
 end

@@ -25,8 +25,8 @@ local user_info_key2 = "user"
 local plugin_name = "jiuzhou-rbac"
 local log = core.log
 local permission_addr = "172.16.179.166"
-local permission_port = 9010
-local version = "2.0.2"
+local permission_port = 8010
+local version = "2.0.3"
 local schema = {}
 local metadata_schema = {}
 local _M = {
@@ -119,10 +119,6 @@ local function send_auth(user_id, method, uri)
         log.error("Failed to connect to host: ", err)
         return nil, err
     end
-
-    -- 设置发送和读取超时
-    httpc:set_timeouts(5000, 5000, 5000) -- connect_timeout, send_timeout, read_timeout
-
     -- 构造请求体
     local body = {
         user_id = user_id,

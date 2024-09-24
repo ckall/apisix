@@ -12,6 +12,8 @@ local httpc = require("resty.http").new()
 --local kafka_lrucache = core.lrucache.new({
 --    type = "plugin",
 --})
+--local jwt_rbac = table.new(0, 0)
+--local n = ngx.location
 local lrucache = core.lrucache.new({
     type = "plugin",
     count = 10000,
@@ -212,9 +214,16 @@ end
 function _M.rewrite(_, ctx)
     --解析jwt
     local auth_header = core.request.header(ctx, auth_header_key)
-    -- 没有认证信息就直接过
+    -- 没有认证可能是文件上传检查下路由有没有upload有就过,信息就直接过
     -- 这里算是漏洞，应该返回401,但是为了兼容上一个版本(上传文件), 所以只能先这样
     if not auth_header then
+        -- 临时解决方案检查是否为文件上传
+        if core.request.get_method() == ngx.HTTP_POST then
+            local uri = core.request.get_uri(ctx)
+            if string.find(uri, "upload") then
+                return
+            end
+        end
         return
     end
     local auth_data = core.lrucache.plugin_ctx(lrucache, ctx, nil, verify_jwt, auth_header)
@@ -285,6 +294,21 @@ function _M.log(conf, ctx)
 
 
     return
+end
+
+local function refresh()
+    return 200, { msg = "rbac refresh success" }
+end
+
+-- module interface for export public api
+function _M.api()
+    return {
+        {
+            methods = { "POST" },
+            uri = "/x/gateway/jiuzhou_rbac/refresh",
+            handler = refresh,
+        }
+    }
 end
 
 return _M

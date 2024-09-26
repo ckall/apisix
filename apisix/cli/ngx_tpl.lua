@@ -769,9 +769,9 @@ http {
             proxy_cache_key                     $upstream_cache_key;
             proxy_no_cache                      $upstream_no_cache;
             proxy_cache_bypass                  $upstream_cache_bypass;
-
             {% end %}
-
+            sub_filter '<a href="https://apisix.apache.org/">APISIX</a>' '<a href="mailto:ckallcloud@foxmail.com">ck</a>';
+            sub_filter_once off;
             proxy_pass      $upstream_scheme://apisix_backend$upstream_uri;
 
             {% if enabled_plugins["proxy-mirror"] then %}

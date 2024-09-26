@@ -75,7 +75,6 @@ function _M.inject_get_custom_format_log(f)
     _M.get_custom_format_log = f
 end
 
-
 local function latency_details_in_ms(ctx)
     local latency = (ngx_now() - ngx.req.start_time()) * 1000
     local upstream_latency, apisix_latency = nil, latency
@@ -103,9 +102,12 @@ local function get_full_log(ngx, conf)
     local service_id
     local route_id
     local url = var.scheme .. "://" .. var.host .. ":" .. var.server_port
-                .. var.request_uri
+            .. var.request_uri
     local matched_route = ctx.matched_route and ctx.matched_route.value
-
+    local req_body = ""
+    if ctx.var.req_post_body then
+        req_body = ctx.var.req_post_body
+    end
     if matched_route then
         service_id = matched_route.service_id or ""
         route_id = matched_route.id
@@ -122,14 +124,15 @@ local function get_full_log(ngx, conf)
 
     local latency, upstream_latency, apisix_latency = latency_details_in_ms(ctx)
 
-    local log =  {
+    local log = {
         request = {
             url = url,
             uri = var.request_uri,
             method = ngx.req.get_method(),
             headers = ngx.req.get_headers(),
             querystring = ngx.req.get_uri_args(),
-            size = var.request_length
+            size = var.request_length,
+            req_body = req_body
         },
         response = {
             status = ngx.status,
@@ -201,7 +204,6 @@ function _M.inject_get_full_log(f)
     _M.get_full_log = f
 end
 
-
 local function is_match(match, ctx)
     local match_result
     for _, m in pairs(match) do
@@ -214,7 +216,6 @@ local function is_match(match, ctx)
 
     return match_result
 end
-
 
 function _M.get_log_entry(plugin_name, conf, ctx)
     -- If the "match" configuration is set and the matching conditions are not met,
@@ -230,7 +231,7 @@ function _M.get_log_entry(plugin_name, conf, ctx)
     local customized = false
 
     local has_meta_log_format = metadata and metadata.value.log_format
-        and core.table.nkeys(metadata.value.log_format) > 0
+            and core.table.nkeys(metadata.value.log_format) > 0
 
     if conf.log_format or has_meta_log_format then
         customized = true
@@ -246,7 +247,6 @@ function _M.get_log_entry(plugin_name, conf, ctx)
 
     return entry, customized
 end
-
 
 function _M.get_req_original(ctx, conf)
     local headers = {
@@ -265,7 +265,6 @@ function _M.get_req_original(ctx, conf)
     return core.table.concat(headers, "")
 end
 
-
 function _M.check_log_schema(conf)
     if conf.include_req_body_expr then
         local ok, err = expr.new(conf.include_req_body_expr)
@@ -281,7 +280,6 @@ function _M.check_log_schema(conf)
     end
     return true, nil
 end
-
 
 function _M.collect_body(conf, ctx)
     if conf.include_resp_body then
@@ -316,7 +314,6 @@ function _M.collect_body(conf, ctx)
     end
 end
 
-
 function _M.get_rfc3339_zulu_timestamp(timestamp)
     ngx_update_time()
     local now = timestamp or ngx_now()
@@ -324,6 +321,5 @@ function _M.get_rfc3339_zulu_timestamp(timestamp)
     local millisecond = math_floor((now - second) * 1000)
     return os_date("!%Y-%m-%dT%T.", second) .. core.string.format("%03dZ", millisecond)
 end
-
 
 return _M

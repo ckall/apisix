@@ -770,7 +770,7 @@ http {
             proxy_no_cache                      $upstream_no_cache;
             proxy_cache_bypass                  $upstream_cache_bypass;
             {% end %}
-            sub_filter '<a href="https://apisix.apache.org/">APISIX</a>' '<a href="https://www.feishu.cn/invitation/page/add_contact/?token=9d0k98c8-505d-418e-8e94-2d8c8f03f5be&amp;unique_id=sMgu8fQe6tJEh2bKdFn2vw==">有问题找程锟</a>';
+            sub_filter '<a href="https://apisix.apache.org/">APISIX</a>' '<a href="https://www.feishu.cn/invitation/page/add_contact/?token=9d0k98c8-505d-418e-8e94-2d8c8f03f5be&amp;unique_id=sMgu8fQe6tJEh2bKdFn2vw==">程锟</a>';
             sub_filter_once off;
             proxy_pass      $upstream_scheme://apisix_backend$upstream_uri;
 

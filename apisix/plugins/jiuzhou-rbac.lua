@@ -7,6 +7,8 @@ local core = require("apisix.core")
 local jwt = require("resty.jwt")
 local ngx = ngx
 local httpc = require("resty.http").new()
+local string_format = string.format
+local string_find = string.find
 local req_read_body = ngx.req.read_body
 local req_get_body_data = ngx.req.get_body_data
 --local red = require("resty.redis").new()
@@ -17,7 +19,8 @@ local req_get_body_data = ngx.req.get_body_data
 -- 防止热点api冲击
 local permission_cache = core.lrucache.new({
     type = "plugin",
-    ttl = 5,
+    ttl = 10,
+    count = 10000,
 })
 
 local lrucache = core.lrucache.new({
@@ -229,13 +232,13 @@ function _M.rewrite(_, ctx)
         -- 临时解决方案检查是否为文件上传
         if core.request.get_method() == ngx.HTTP_POST then
             local uri = core.request.get_uri(ctx)
-            if string.find(uri, "upload") then
+            if string_find(uri, "upload") then
                 return
             end
         end
         return
     end
-    local auth_data = core.lrucache.plugin_ctx(lrucache, ctx, nil, verify_jwt, auth_header)
+    local auth_data = core.lrucache.plugin_ctx(lrucache, ctx, auth_header, verify_jwt, auth_header)
     if not auth_data then
         return response(ngx.HTTP_UNAUTHORIZED)
     end
@@ -260,7 +263,8 @@ function _M.rewrite(_, ctx)
     local uri = core.request.get_uri(ctx)
     local user_id = auth_data.user_id
     local httpc_res
-    httpc_res, err = core.lrucache.plugin_ctx(permission_cache, ctx, nil, send_auth, user_id, method, uri)
+    --httpc_res, err = send_auth(user_id, method, uri)
+    httpc_res, err = core.lrucache.plugin_ctx(permission_cache, ctx, string_format("%d:%s:%s", user_id, method, uri), send_auth, user_id, method, uri)
     if err then
         return response(ngx.HTTP_INTERNAL_SERVER_ERROR, err)
     end
@@ -290,7 +294,7 @@ function _M.log(conf, ctx)
     local host = core.request.get_host(ctx)
     local uri = core.request.get_uri(ctx)
     local get_args = core.request.get_args(ctx)
-    local url = string.format("%s://$s%s%s", scheme, host, uri, get_args)
+    local url = string_format("%s://$s%s%s", scheme, host, uri, get_args)
     local jwt_auth = ctx.var.auth_data
     local route_id = ctx.var.route_id
     local req_post_body = ctx.var.req_post_body
@@ -298,7 +302,7 @@ function _M.log(conf, ctx)
         jwt_auth = "no auth jwt"
     end
     -- 这里还是记录普通的日志, 发送kafka,啥的还是打通其它扩展来完成,不然太麻烦了,也太重了
-    log.error(string.format(
+    log.error(string_format(
             'jiuzhou plugins rbac log method: "%s" Host: "%s" Uri: "%s" post_body2: "%s" jwt_obj: "%s" route_id: %d',
             method, host, url, req_post_body, jwt_auth, route_id
     ))

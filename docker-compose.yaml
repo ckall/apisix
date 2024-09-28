@@ -53,6 +53,7 @@ services:
       - ./conf/schema.json:/usr/local/apisix-dashboard/conf/schema.json
     ports:
       - "9002:9000"
+    container_name: apisix-dashboard
     restart: always
 #
 ## 分割线

@@ -46,14 +46,13 @@ conf:
       # such as: logs/access.log, /tmp/logs/access.log, /dev/stdout, /dev/stderr
       # log example: 2020-12-09T16:38:09.039+0800	INFO	filter/logging.go:46	/apisix/admin/routes/r1	{"status": 401, "host": "127.0.0.1:9000", "query": "asdfsafd=adf&a=a", "requestId": "3d50ecb8-758c-46d1-af5b-cd9d1c820156", "latency": 0, "remoteIP": "127.0.0.1", "method": "PUT", "errs": []}
 authentication:
-  secret:
-    secret              # secret for jwt token generation.
+  secret: nfqkdug3s7ptecuwf952              # secret for jwt token generation.
   # NOTE: Highly recommended to modify this value to protect `manager api`.
   # if it's default value, when `manager api` start, it will generate a random string to replace it.
   expire_time: 3600     # jwt token expire time, in second
   users: # yamllint enable rule:comments-indentation
     - username: admin   # username and password for login `manager api`
-      password: b1d1968c0e39087c
+      password: evagh5748tfpfwhzru74
 plugins: # plugin list (sorted by priority)
   - real-ip                        # priority: 23000
   - ai                             # priority: 22900

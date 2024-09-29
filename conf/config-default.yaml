@@ -648,10 +648,10 @@ deployment: # Deployment configurations
     admin_key_required: true   # Enable Admin API authentication by default for security.
     admin_key:
       - name: admin                             # admin: write access to configurations.
-        key: edd1c9f034335f136f87ad84b625c8f1   # Set API key for the admin of Admin API.
+        key: nc2ggwvifiod8lc9h91b2kd9ddg5jn1j   # Set API key for the admin of Admin API.
         role: admin
       - name: viewer                            # viewer: read-only to configurations.
-        key: 4054f7cf07e344346cd3f287985e76a2   # Set API key for the viewer of Admin API.
+        key: qwu7v3ly607yn8jzh7dd3edbvpoyxv3j   # Set API key for the viewer of Admin API.
         role: viewer
 
     enable_admin_cors: true       # Enable Admin API CORS response header `Access-Control-Allow-Origin`.
@@ -674,7 +674,6 @@ deployment: # Deployment configurations
   etcd:
     host: # Set etcd address(es) in the same etcd cluster.
       - "http://etcd:2379"   # If TLS is enabled for etcd, use https://127.0.0.1:2379.
-    #      - "http://172.16.179.206:2379"   # If TLS is enabled for etcd, use https://127.0.0.1:2379.
     prefix: /apisix/test              # Set etcd prefix.
     timeout: 30                   # The timeout when connect/read/write to etcd, Set timeout in seconds.
     watch_timeout: 50             # The timeout when watch etcd

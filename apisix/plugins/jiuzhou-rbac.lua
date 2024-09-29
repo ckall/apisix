@@ -11,11 +11,6 @@ local string_format = string.format
 local string_find = string.find
 local req_read_body = ngx.req.read_body
 local req_get_body_data = ngx.req.get_body_data
---local red = require("resty.redis").new()
---local kafka = require("resty.kafka.producer")
---local kafka_lrucache = core.lrucache.new({
---    type = "plugin",
---})
 -- 防止热点api冲击
 local permission_cache = core.lrucache.new({
     type = "plugin",
@@ -38,7 +33,19 @@ local log = core.log
 local permission_addr = "172.16.179.166"
 local permission_port = 8010
 local version = "2.0.3"
-local schema = {}
+local schema = {
+    type = "object",
+    properties = {
+        -- 白名单不检查权限直接过
+        white_list = {
+            type = "array",
+            minItems = 1,
+            items = {
+                type = "string"
+            }
+        }
+    }
+}
 local metadata_schema = {}
 local _M = {
     version = version,
@@ -48,137 +55,129 @@ local _M = {
     metadata_schema = metadata_schema,
 }
 
---redis_cli
---local red, err = redis_cli({
---    redis_host = "redis",
---    redis_database = 1,
---})
---if not red then
---    log.error("Failed to connect to redis: ", err)
---end
---local red_res1, err = red:set("test", "test")
---if err then
---    log.error("Failed to set value in redis1: ", err, red_res1)
---    return 500, err
---end
---local red_res, err = red:get("test")
---if err then
---    log.error("Failed to set value in redis2: ", err)
---    return 500, err
---end
---if red_res then
---    log.info("Successfully set value in redis2: ", red_res)
---    return
---end
---- 获取redis
---- @param conf table
---- @return table, string
---local function redis_cli(conf)
---    local timeout = conf.redis_timeout or 1000 -- 1sec
+--local function send_auth(token, user_id, method, uri)
+--    httpc:set_timeout(5 * 1000) -- 设置连接、发送、读取的总超时时间
 --
---    red:set_timeouts(timeout, timeout, timeout)
---
---    local sock_opts = {
---        ssl = conf.redis_ssl,
---        ssl_verify = conf.redis_ssl_verify
---    }
---
---    local ok, err = red:connect(conf.redis_host, conf.redis_port or 6379, sock_opts)
+--    -- 连接到指定主机
+--    local ok, err = httpc:connect({
+--        scheme = "http",
+--        host = "open.duanju.com",
+--        port = 80,
+--    })
 --    if not ok then
---        return false, err
---    end
---
---    local count
---    count, err = red:get_reused_times()
---    if 0 == count then
---        if conf.redis_password and conf.redis_password ~= '' then
---            if conf.redis_username then
---                ok, err = red:auth(conf.redis_username, conf.redis_password)
---            else
---                ok, err = red:auth(conf.redis_password)
---            end
---            if not ok then
---                return nil, err
---            end
---        end
---
---        -- select db
---        if conf.redis_database ~= 0 then
---            ok, err = red:select(conf.redis_database)
---            if not ok then
---                return false, "failed to change redis db, err: " .. err
---            end
---        end
---    elseif err then
+--        log.error("Failed to connect to host: ", err)
 --        return nil, err
 --    end
---    return red, nil
+--
+--    -- 设置发送和读取超时
+--    httpc:set_timeouts(5000, 5000, 5000) -- connect_timeout, send_timeout, read_timeout
+--
+--    -- 构造请求体
+--    local body = json.encode({
+--        user_id = user_id,
+--        method = method,
+--        path = uri,
+--    })
+--
+--    log.info("Sending request with body: ", body)
+--
+--    -- 发起 HTTP 请求
+--    local res
+--    res, err = httpc:request({
+--        method = "POST",
+--        path = "/v1/user/route/app",
+--        body = body,
+--        headers = {
+--            ["Content-Type"] = "application/json",
+--            ["X-JiuZhou-Authorization"] = token,
+--            ["X-JiuZhou-Service"] = "AuthSSO",
+--        }
+--    })
+--    if err then
+--        log.error("Failed to send data: ", err)
+--        httpc:close()
+--        return nil, err
+--    end
+--    -- 读取响应体
+--    local res_body, read_err = res:read_body()
+--    if read_err then
+--        log.error("Failed to read response body: ", read_err)
+--        httpc:close()
+--        return nil, read_err
+--    end
+--    -- 使用 keepalive 以便重用连接
+--    ok, err = httpc:set_keepalive(60000, 10)
+--    if not ok then
+--        log.error("Failed to set keepalive: ", err)
+--        httpc:close()
+--        return nil, err
+--    end
+--
+--    return {
+--        status = res.status,
+--        body = res_body
+--    }, nil
 --end
-
 --- 获取用户信息
 --- @overload fun(token:string, user_id:number, method:string, uri:string): table, string
---- @param token string
 --- @param user_id number
 --- @param method string
 --- @param uri string
 --- @return table,string
-local send_auth
-do
-    function send_auth(user_id, method, uri)
-        httpc:set_timeout(5 * 1000) -- 设置连接、发送、读取的总超时时间
-        -- 连接到指定主机
-        local ok, err = httpc:connect(permission_addr, permission_port)
-        if not ok then
-            log.error("Failed to connect to host: ", err)
-            return nil, err
-        end
-        -- 构造请求体
-        local body = {
-            user_id = user_id,
-            method = method,
-            path = uri,
-        }
-
-        -- 将请求体转换为 JSON 字符串
-        local body_json = json.encode(body)
-
-        -- 发起 HTTP 请求
-        local res
-        res, err = httpc:request({
-            method = "POST",
-            path = "/v1/user/route/app",
-            body = body_json, -- 使用 JSON 字符串作为请求体
-            headers = {
-                ["Content-Type"] = "application/json",
-            }
-        })
-        if not res then
-            log.error("Failed to send data: ", err)
-            httpc:close()
-            return nil, err
-        end
-
-        -- 读取响应体
-        local res_body, read_err = res:read_body()
-        if read_err then
-            log.error("Failed to read response body: ", read_err)
-            httpc:close()
-            return nil, read_err
-        end
-
-        -- 使用 keepalive 以便重用连接
-        ok, err = httpc:set_keepalive(60000, 10)
-        if not ok then
-            log.error("Failed to set keepalive: ", err)
-            httpc:close()
-            return nil, err
-        end
-
-        return {
-            status = res.status,
-            body = res_body
-        }, nil
+local function send_auth(user_id, method, uri)
+    httpc:set_timeout(5 * 1000) -- 设置连接、发送、读取的总超时时间
+    -- 连接到指定主机
+    local ok, err = httpc:connect(permission_addr, permission_port)
+    if not ok then
+        log.error("Failed to connect to host: ", err)
+        return nil, err
     end
+    -- 构造请求体
+    local body = {
+        user_id = user_id,
+        method = method,
+        path = uri,
+    }
+
+    -- 将请求体转换为 JSON 字符串
+    local body_json = json.encode(body)
+
+    -- 发起 HTTP 请求
+    local res
+    res, err = httpc:request({
+        method = "POST",
+        path = "/v1/user/route/app",
+        body = body_json, -- 使用 JSON 字符串作为请求体
+        headers = {
+            ["Content-Type"] = "application/json",
+        }
+    })
+    if not res then
+        log.error("Failed to send data: ", err)
+        httpc:close()
+        return nil, err
+    end
+
+    -- 读取响应体
+    local res_body, read_err = res:read_body()
+    if read_err then
+        log.error("Failed to read response body: ", read_err)
+        httpc:close()
+        return nil, read_err
+    end
+
+    -- 使用 keepalive 以便重用连接
+    ok, err = httpc:set_keepalive(60000, 10)
+    if not ok then
+        log.error("Failed to set keepalive: ", err)
+        httpc:close()
+        return nil, err
+    end
+
+    return {
+        status = res.status,
+        body = res_body
+    }, nil
 end
 
 --检查配置文件
@@ -222,23 +221,23 @@ end
 --- @overload fun(conf:table, ctx:table):number
 --- @param conf table
 --- @param ctx table
---- @return number,table
-function _M.rewrite(_, ctx)
-    --解析jwt
-    local auth_header = core.request.header(ctx, auth_header_key)
-    -- 没有认证可能是文件上传检查下路由有没有upload有就过,信息就直接过
-    -- 这里算是漏洞，应该返回401,但是为了兼容上一个版本(上传文件), 所以只能先这样
-    if not auth_header then
-        -- 临时解决方案检查是否为文件上传
-        if core.request.get_method() == ngx.HTTP_POST then
-            local uri = core.request.get_uri(ctx)
-            if string_find(uri, "upload") then
-                return
-            end
+--- @return number,table | number, void | void | number, string
+function _M.rewrite(conf, ctx)
+    local uri = core.request.get_uri(ctx)
+    --从conf获取白名单路由
+    local white_list = conf.white_list
+    for _, v in ipairs(white_list) do
+        if uri == v then
+            return
         end
-        return
     end
-    local auth_data = core.lrucache.plugin_ctx(lrucache, ctx, auth_header, verify_jwt, auth_header)
+    --解析jwt
+    local token = core.request.header(ctx, auth_header_key)
+    if not token then
+        -- 没有认证
+        return response(ngx.HTTP_UNAUTHORIZED)
+    end
+    local auth_data = core.lrucache.plugin_ctx(lrucache, ctx, token, verify_jwt, token)
     if not auth_data then
         return response(ngx.HTTP_UNAUTHORIZED)
     end
@@ -260,7 +259,6 @@ function _M.rewrite(_, ctx)
         req_post_body = post_body:gsub("%s+", ""):gsub("[\n\r]+", "")
     end
     ctx.var.req_post_body = req_post_body
-    local uri = core.request.get_uri(ctx)
     local user_id = auth_data.user_id
     local httpc_res
     --httpc_res, err = send_auth(user_id, method, uri)
@@ -288,6 +286,9 @@ end
 
 -- 记录日志
 --- @overload fun(conf:table, ctx:table):void
+--- @param conf table
+--- @param ctx table
+--- @return void
 function _M.log(conf, ctx)
     local scheme = core.request.get_scheme(ctx)
     local method = core.request.get_method()

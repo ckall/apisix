@@ -684,9 +684,9 @@ deployment: # Deployment configurations
     startup_retry: 2              # Set the number of retries to etcd on startup. Default to 2.
     # user: root                  # Set the root username for etcd.
     # password: 5tHkHhYkjr6cQ     # Set the root password for etcd.
-    tls:
+#    tls:
       # cert: /path/to/cert       # Set the path to certificate used by the etcd client
       # key: /path/to/key         # Set the path to path of key used by the etcd client
-      verify: true                # Verify the etcd certificate when establishing a TLS connection with etcd.
+#      verify: true                # Verify the etcd certificate when establishing a TLS connection with etcd.
       # sni:                      # The SNI for etcd TLS requests.
       # If not set, the host from the URL is used.

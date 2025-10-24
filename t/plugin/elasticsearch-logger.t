@@ -46,8 +46,7 @@ __DATA__
                 {
                     endpoint_addr = "http://127.0.0.1:9200",
                     field = {
-                        index = "services",
-                        type = "collector"
+                        index = "services"
                     },
                     auth = {
                         username = "elastic",
@@ -165,6 +164,18 @@ passed
     end)
 
     http.request_uri = function(self, uri, params)
+        if params.method == "GET" then
+            return {
+                status = 200,
+                body = [[
+                {
+                    "version": {
+                        "number": "8.10.2"
+                    }
+                }
+                ]]
+            }
+        end
         if not params.body or type(params.body) ~= "string" then
             return nil, "invalid params body"
         end
@@ -293,9 +304,7 @@ GET /hello
 --- response_body
 hello world
 --- error_log
-Batch Processor[elasticsearch-logger] failed to process entries: elasticsearch server returned status: 401
-"reason":"missing authentication credentials for REST request [/_bulk]"
-Batch Processor[elasticsearch-logger] exceeded the max_retry_count
+failed to process entries: elasticsearch server returned status: 401
 
 
 
@@ -416,6 +425,18 @@ passed
     end)
 
     http.request_uri = function(self, uri, params)
+        if params.method == "GET" then
+            return {
+                status = 200,
+                body = [[
+                {
+                    "version": {
+                        "number": "8.10.2"
+                    }
+                }
+                ]]
+            }
+        end
         if not params.body or type(params.body) ~= "string" then
             return nil, "invalid params body"
         end
@@ -454,7 +475,7 @@ check elasticsearch custom body success
 --- yaml_config
 apisix:
     data_encryption:
-        enable: true
+        enable_encrypt_fields: true
         keyring:
             - edd1c9f0985e76a2
 --- config
@@ -637,6 +658,18 @@ passed
     end)
 
     http.request_uri = function(self, uri, params)
+        if params.method == "GET" then
+            return {
+                status = 200,
+                body = [[
+                {
+                    "version": {
+                        "number": "8.10.2"
+                    }
+                }
+                ]]
+            }
+        end
         if not params.body or type(params.body) ~= "string" then
             return nil, "invalid params body"
         end
@@ -668,3 +701,294 @@ hello world
 --- wait: 2
 --- error_log
 check elasticsearch custom body success
+
+
+
+=== TEST 17: using unsupported field (type) for elasticsearch v8 should work normally
+--- config
+    location /t {
+        content_by_lua_block {
+            local t = require("lib.test_admin").test
+            local code, body = t('/apisix/admin/routes/1', ngx.HTTP_PUT, {
+                uri = "/hello",
+                upstream = {
+                    type = "roundrobin",
+                    nodes = {
+                        ["127.0.0.1:1980"] = 1
+                    }
+                },
+                plugins = {
+                    ["elasticsearch-logger"] = {
+                        endpoint_addr = "http://127.0.0.1:9201",
+                        field = {
+                            index = "services",
+                            type = "collector"
+                        },
+                        auth = {
+                            username = "elastic",
+                            password = "123456"
+                        },
+                        batch_max_size = 1,
+                        inactive_timeout = 1
+                    }
+                }
+            })
+
+            if code >= 300 then
+                ngx.status = code
+            end
+            ngx.say(body)
+        }
+    }
+--- response_body
+passed
+
+
+
+=== TEST 18: test route (auth success)
+--- request
+GET /hello
+--- wait: 2
+--- response_body
+hello world
+--- no_error_log
+Action/metadata line [1] contains an unknown parameter [_type]
+
+
+
+=== TEST 19: add plugin with 'include_req_body' setting, collect request log
+--- config
+    location /t {
+        content_by_lua_block {
+            local t = require("lib.test_admin").test
+            t('/apisix/admin/plugin_metadata/elasticsearch-logger', ngx.HTTP_DELETE)
+
+            local code, body = t('/apisix/admin/routes/1', ngx.HTTP_PUT, {
+                uri = "/hello",
+                upstream = {
+                    type = "roundrobin",
+                    nodes = {
+                        ["127.0.0.1:1980"] = 1
+                    }
+                },
+                plugins = {
+                    ["elasticsearch-logger"] = {
+                        endpoint_addr = "http://127.0.0.1:9201",
+                        field = {
+                            index = "services"
+                        },
+                        auth = {
+                            username = "elastic",
+                            password = "123456"
+                        },
+                        batch_max_size = 1,
+                        inactive_timeout = 1,
+                        include_req_body = true
+                    }
+                }
+            })
+
+            if code >= 300 then
+                ngx.status = code
+            end
+
+            local code, _, body = t("/hello", "POST", "{\"sample_payload\":\"hello\"}")
+        }
+    }
+--- error_log
+"body":"{\"sample_payload\":\"hello\"}"
+
+
+
+=== TEST 20: add plugin with 'include_resp_body' setting, collect response log
+--- config
+    location /t {
+        content_by_lua_block {
+            local t = require("lib.test_admin").test
+            t('/apisix/admin/plugin_metadata/elasticsearch-logger', ngx.HTTP_DELETE)
+
+            local code, body = t('/apisix/admin/routes/1', ngx.HTTP_PUT, {
+                uri = "/hello",
+                upstream = {
+                    type = "roundrobin",
+                    nodes = {
+                        ["127.0.0.1:1980"] = 1
+                    }
+                },
+                plugins = {
+                    ["elasticsearch-logger"] = {
+                        endpoint_addr = "http://127.0.0.1:9201",
+                        field = {
+                            index = "services"
+                        },
+                        auth = {
+                            username = "elastic",
+                            password = "123456"
+                        },
+                        batch_max_size = 1,
+                        inactive_timeout = 1,
+                        include_req_body = true,
+                        include_resp_body = true
+                    }
+                }
+            })
+
+            if code >= 300 then
+                ngx.status = code
+            end
+
+            local code, _, body = t("/hello", "POST", "{\"sample_payload\":\"hello\"}")
+        }
+    }
+--- error_log
+"body":"hello world\n"
+
+
+
+=== TEST 21: set route (auth) - check compat with version 9
+--- config
+    location /t {
+        content_by_lua_block {
+            local t = require("lib.test_admin").test
+            local code, body = t('/apisix/admin/routes/1', ngx.HTTP_PUT, {
+                uri = "/hello",
+                upstream = {
+                    type = "roundrobin",
+                    nodes = {
+                        ["127.0.0.1:1980"] = 1
+                    }
+                },
+                plugins = {
+                    ["elasticsearch-logger"] = {
+                        endpoint_addr = "http://127.0.0.1:9301",
+                        field = {
+                            index = "services"
+                        },
+                        auth = {
+                            username = "elastic",
+                            password = "123456"
+                        },
+                        batch_max_size = 1,
+                        inactive_timeout = 1
+                    }
+                }
+            })
+            if code >= 300 then
+                ngx.status = code
+            end
+            ngx.say(body)
+        }
+    }
+--- response_body
+passed
+
+
+
+=== TEST 22: test route (auth success)
+--- request
+GET /hello
+--- wait: 2
+--- response_body
+hello world
+--- error_log
+Batch Processor[elasticsearch-logger] successfully processed the entries
+
+
+
+=== TEST 23: set route (auth) - check compat with version 7
+--- config
+    location /t {
+        content_by_lua_block {
+            local t = require("lib.test_admin").test
+            local code, body = t('/apisix/admin/routes/1', ngx.HTTP_PUT, {
+                uri = "/hello",
+                upstream = {
+                    type = "roundrobin",
+                    nodes = {
+                        ["127.0.0.1:1980"] = 1
+                    }
+                },
+                plugins = {
+                    ["elasticsearch-logger"] = {
+                        endpoint_addr = "http://127.0.0.1:9401",
+                        field = {
+                            index = "services"
+                        },
+                        auth = {
+                            username = "elastic",
+                            password = "123456"
+                        },
+                        batch_max_size = 1,
+                        inactive_timeout = 1
+                    }
+                }
+            })
+            if code >= 300 then
+                ngx.status = code
+            end
+            ngx.say(body)
+        }
+    }
+--- response_body
+passed
+
+
+
+=== TEST 24: test route (auth success)
+--- request
+GET /hello
+--- wait: 2
+--- response_body
+hello world
+--- error_log
+Batch Processor[elasticsearch-logger] successfully processed the entries
+
+
+
+=== TEST 25: set route (auth) - check compat with version 6
+--- config
+    location /t {
+        content_by_lua_block {
+            local t = require("lib.test_admin").test
+            local code, body = t('/apisix/admin/routes/1', ngx.HTTP_PUT, {
+                uri = "/hello",
+                upstream = {
+                    type = "roundrobin",
+                    nodes = {
+                        ["127.0.0.1:1980"] = 1
+                    }
+                },
+                plugins = {
+                    ["elasticsearch-logger"] = {
+                        endpoint_addr = "http://127.0.0.1:9501",
+                        field = {
+                            index = "services"
+                        },
+                        auth = {
+                            username = "elastic",
+                            password = "123456"
+                        },
+                        batch_max_size = 1,
+                        inactive_timeout = 1
+                    }
+                }
+            })
+            if code >= 300 then
+                ngx.status = code
+            end
+            ngx.say(body)
+        }
+    }
+--- response_body
+passed
+
+
+
+=== TEST 26: test route (auth success)
+--- request
+GET /hello
+--- wait: 2
+--- response_body
+hello world
+--- error_log
+Batch Processor[elasticsearch-logger] successfully processed the entries

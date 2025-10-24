@@ -58,6 +58,7 @@ local str_sub         = string.sub
 local tonumber        = tonumber
 local type            = type
 local pairs           = pairs
+local tostring       = tostring
 local ngx_re_match    = ngx.re.match
 local control_api_router
 
@@ -113,13 +114,6 @@ function _M.http_init_worker()
     -- for testing only
     core.log.info("random test in [1, 10000]: ", math.random(1, 10000))
 
-    -- Because go's scheduler doesn't work after fork, we have to load the gRPC module
-    -- in each worker.
-    core.grpc = require("apisix.core.grpc")
-    if type(core.grpc) ~= "table" then
-        core.grpc = nil
-    end
-
     require("apisix.events").init_worker()
 
     local discovery = require("apisix.discovery.init").discovery
@@ -155,6 +149,7 @@ function _M.http_init_worker()
     apisix_upstream.init_worker()
     require("apisix.plugins.ext-plugin.init").init_worker()
 
+    control_api_router.init_worker()
     local_conf = core.config.local_conf()
 
     if local_conf.apisix and local_conf.apisix.enable_server_tokens == false then
@@ -171,7 +166,7 @@ function _M.http_exit_worker()
 end
 
 
-function _M.http_ssl_phase()
+function _M.ssl_phase()
     local ok, err = router.router_ssl.set(ngx.ctx.matched_ssl)
     if not ok then
         if err then
@@ -182,7 +177,7 @@ function _M.http_ssl_phase()
 end
 
 
-function _M.http_ssl_client_hello_phase()
+function _M.ssl_client_hello_phase()
     local sni, err = apisix_ssl.server_name(true)
     if not sni or type(sni) ~= "string" then
         local advise = "please check if the client requests via IP or uses an outdated " ..
@@ -191,6 +186,7 @@ function _M.http_ssl_client_hello_phase()
         core.log.error("failed to find SNI: " .. (err or advise))
         ngx_exit(-1)
     end
+    local tls_ext_status_req = apisix_ssl.get_status_request_ext()
 
     local ngx_ctx = ngx.ctx
     local api_ctx = core.tablepool.fetch("api_ctx", 0, 32)
@@ -201,6 +197,7 @@ function _M.http_ssl_client_hello_phase()
     ngx_ctx.matched_ssl = api_ctx.matched_ssl
     core.tablepool.release("api_ctx", api_ctx)
     ngx_ctx.api_ctx = nil
+    ngx_ctx.tls_ext_status_req = tls_ext_status_req
 
     if not ok then
         if err then
@@ -215,6 +212,10 @@ function _M.http_ssl_client_hello_phase()
         core.log.error("failed to set ssl protocols: ", err)
         ngx_exit(-1)
     end
+
+    -- in stream subsystem, ngx.ssl.server_name() return hostname of ssl session in preread phase,
+    -- so that we can't get real SNI without recording it in ngx.ctx during client_hello phase
+    ngx.ctx.client_hello_sni = sni
 end
 
 
@@ -250,15 +251,7 @@ local function parse_domain_in_route(route)
     -- don't modify the modifiedIndex to avoid plugin cache miss because of DNS resolve result
     -- has changed
 
-    local parent = route.value.upstream.parent
-    if parent then
-        route.value.upstream.parent = nil
-    end
-    route.dns_value = core.table.deepcopy(route.value)
-    if parent then
-        route.value.upstream.parent = parent
-        route.dns_value.upstream.parent = parent
-    end
+    route.dns_value = core.table.deepcopy(route.value, { shallows = { "self.upstream.parent"}})
     route.dns_value.upstream.nodes = new_nodes
     core.log.info("parse route which contain domain: ",
                   core.json.delay_encode(route, true))
@@ -307,13 +300,25 @@ local function set_upstream_headers(api_ctx, picked_server)
 end
 
 
-local function verify_tls_client(ctx)
-    if apisix_base_flags.client_cert_verified_in_handshake then
-        -- For apisix-runtime, there is no need to rematch SSL rules as the invalid
-        -- connections are already rejected in the handshake
-        return true
+-- verify the TLS session resumption by checking if the SNI in the client hello
+-- matches the hostname of the SSL session, this is to prevent the mTLS bypass security issue.
+local function verify_tls_session_resumption()
+    local session_hostname, err = apisix_ssl.session_hostname()
+    if err then
+        core.log.error("failed to get session hostname: ", err)
+        return false
+    end
+    if session_hostname and session_hostname ~= ngx.ctx.client_hello_sni then
+        core.log.error("sni in client hello mismatch hostname of ssl session, ",
+                         "sni: ", ngx.ctx.client_hello_sni, ", hostname: ", session_hostname)
+        return false
     end
 
+    return true
+end
+
+
+local function verify_tls_client(ctx)
     local matched = router.router_ssl.match_and_set(ctx, true)
     if not matched then
         return true
@@ -329,6 +334,10 @@ local function verify_tls_client(ctx)
                 core.log.error("client certificate verification is not passed: ", res)
             end
 
+            return false
+        end
+
+        if not verify_tls_session_resumption() then
             return false
         end
     end
@@ -402,6 +411,10 @@ local function verify_https_client(ctx)
                            ", but the host is ", host)
             return false
         end
+
+        if not verify_tls_session_resumption() then
+            return false
+        end
     end
 
     return true
@@ -465,6 +478,12 @@ end
 
 
 function _M.handle_upstream(api_ctx, route, enable_websocket)
+    -- some plugins(ai-proxy...) request upstream by http client directly
+    if api_ctx.bypass_nginx_upstream then
+        common_phase("before_proxy")
+        return
+    end
+
     local up_id = route.value.upstream_id
 
     -- used for the traffic-split plugin
@@ -573,6 +592,11 @@ end
 
 
 function _M.http_access_phase()
+    -- from HTTP/3 to HTTP/1.1 we need to convert :authority pesudo-header
+    -- to Host header, so we set upstream_host variable here.
+    if ngx.req.http_version() == 3 then
+        ngx.var.upstream_host = ngx.var.host .. ":" .. ngx.var.server_port
+    end
     local ngx_ctx = ngx.ctx
 
     -- always fetch table from the table pool, we don't need a reused api_ctx
@@ -823,9 +847,18 @@ local function healthcheck_passive(api_ctx)
     local host = up_conf.checks and up_conf.checks.active
                  and up_conf.checks.active.host
     local port = up_conf.checks and up_conf.checks.active
-                 and up_conf.checks.active.port
+                 and up_conf.checks.active.port or api_ctx.balancer_port
 
     local resp_status = ngx.status
+
+    if not is_http then
+        -- 200 is the only success status code for TCP
+        if resp_status ~= 200 then
+            checker:report_tcp_failure(api_ctx.balancer_ip, port, host, nil, "passive")
+        end
+        return
+    end
+
     local http_statuses = passive and passive.healthy and
                           passive.healthy.http_statuses
     core.log.info("passive.healthy.http_statuses: ",
@@ -834,7 +867,7 @@ local function healthcheck_passive(api_ctx)
         for i, status in ipairs(http_statuses) do
             if resp_status == status then
                 checker:report_http_status(api_ctx.balancer_ip,
-                                           port or api_ctx.balancer_port,
+                                           port,
                                            host,
                                            resp_status)
             end
@@ -852,11 +885,66 @@ local function healthcheck_passive(api_ctx)
     for i, status in ipairs(http_statuses) do
         if resp_status == status then
             checker:report_http_status(api_ctx.balancer_ip,
-                                       port or api_ctx.balancer_port,
+                                       port,
                                        host,
                                        resp_status)
         end
     end
+end
+
+
+function _M.status()
+    core.response.exit(200, core.json.encode({ status = "ok" }))
+end
+
+function _M.status_ready()
+    local local_conf = core.config.local_conf()
+    local role = core.table.try_read_attr(local_conf, "deployment", "role")
+    local provider = core.table.try_read_attr(local_conf, "deployment", "role_" ..
+                                              role, "config_provider")
+    if provider == "yaml" or provider == "etcd" then
+        local status_shdict = ngx.shared["status-report"]
+        local ids = status_shdict:get_keys()
+        local error
+        local worker_count = ngx.worker.count()
+       if #ids ~= worker_count then
+            core.log.warn("worker count: ", worker_count, " but status report count: ", #ids)
+            error = "worker count: " .. ngx.worker.count() ..
+            " but status report count: " .. #ids
+        end
+        if error then
+            core.response.exit(503, core.json.encode({
+                status = "error",
+                error = error
+            }))
+            return
+        end
+        for _, id in ipairs(ids) do
+            local ready = status_shdict:get(id)
+            if not ready then
+                core.log.warn("worker id: ", id, " has not received configuration")
+                error = "worker id: " .. id ..
+                                  " has not received configuration"
+                break
+            end
+        end
+
+        if error then
+            core.response.exit(503, core.json.encode({
+                status = "error",
+                error = error
+            }))
+            return
+        end
+
+        core.response.exit(200, core.json.encode({ status = "ok" }))
+        return
+    end
+
+    core.response.exit(503, core.json.encode({
+        status = "error",
+        message = "unknown config provider: " .. tostring(provider)
+    }), { ["Content-Type"] = "application/json" })
 end
 
 
@@ -954,25 +1042,6 @@ function _M.http_control()
     local ok = control_api_router.match(get_var("uri"))
     if not ok then
         ngx_exit(404)
-    end
-end
-
-
-function _M.stream_ssl_phase()
-    local ngx_ctx = ngx.ctx
-    local api_ctx = core.tablepool.fetch("api_ctx", 0, 32)
-    ngx_ctx.api_ctx = api_ctx
-
-    local ok, err = router.router_ssl.match_and_set(api_ctx)
-
-    core.tablepool.release("api_ctx", api_ctx)
-    ngx_ctx.api_ctx = nil
-
-    if not ok then
-        if err then
-            core.log.error("failed to fetch ssl config: ", err)
-        end
-        ngx_exit(-1)
     end
 end
 
@@ -1169,6 +1238,8 @@ function _M.stream_log_phase()
     if not api_ctx then
         return
     end
+
+    healthcheck_passive(api_ctx)
 
     core.ctx.release_vars(api_ctx)
     if api_ctx.plugins then

@@ -28,6 +28,7 @@ local pcall = pcall
 local select = select
 local type = type
 local prometheus
+local prometheus_bkp
 local router = require("apisix.router")
 local get_routes = router.http_routes
 local get_ssls   = router.ssls
@@ -112,6 +113,9 @@ function _M.http_init(prometheus_enabled_in_stream)
     -- todo: support hot reload, we may need to update the lua-prometheus
     -- library
     if ngx.get_phase() ~= "init" and ngx.get_phase() ~= "init_worker"  then
+        if prometheus_bkp then
+            prometheus = prometheus_bkp
+        end
         return
     end
 
@@ -132,6 +136,15 @@ function _M.http_init(prometheus_enabled_in_stream)
         metric_prefix = attr.metric_prefix
     end
 
+    local status_metrics_exptime = core.table.try_read_attr(attr, "metrics",
+                                   "http_status", "expire")
+    local latency_metrics_exptime = core.table.try_read_attr(attr, "metrics",
+                                   "http_latency", "expire")
+    local bandwidth_metrics_exptime = core.table.try_read_attr(attr, "metrics",
+                                   "bandwidth", "expire")
+    local upstream_status_exptime = core.table.try_read_attr(attr, "metrics",
+                                   "upstream_status", "expire")
+
     prometheus = base_prometheus.init("prometheus-metrics", metric_prefix)
 
     metrics.connections = prometheus:gauge("nginx_http_current_connections",
@@ -144,10 +157,9 @@ function _M.http_init(prometheus_enabled_in_stream)
     metrics.etcd_reachable = prometheus:gauge("etcd_reachable",
             "Config server etcd reachable from APISIX, 0 is unreachable")
 
-
     metrics.node_info = prometheus:gauge("node_info",
             "Info of APISIX node",
-            {"hostname"})
+            {"hostname", "version"})
 
     metrics.etcd_modify_indexes = prometheus:gauge("etcd_modify_indexes",
             "Etcd modify index for APISIX keys",
@@ -163,7 +175,8 @@ function _M.http_init(prometheus_enabled_in_stream)
 
     metrics.upstream_status = prometheus:gauge("upstream_status",
             "Upstream status from health check",
-            {"name", "ip", "port"})
+            {"name", "ip", "port"},
+            upstream_status_exptime)
 
     -- per service
 
@@ -173,7 +186,8 @@ function _M.http_init(prometheus_enabled_in_stream)
     metrics.status = prometheus:counter("http_status",
             "HTTP status codes per service in APISIX",
             {"code", "route", "matched_uri", "matched_host", "service", "consumer", "node",
-            unpack(extra_labels("http_status"))})
+            unpack(extra_labels("http_status"))},
+            status_metrics_exptime)
 
     local buckets = DEFAULT_BUCKETS
     if attr and attr.default_buckets then
@@ -183,11 +197,12 @@ function _M.http_init(prometheus_enabled_in_stream)
     metrics.latency = prometheus:histogram("http_latency",
         "HTTP request latency in milliseconds per service in APISIX",
         {"type", "route", "service", "consumer", "node", unpack(extra_labels("http_latency"))},
-        buckets)
+        buckets, latency_metrics_exptime)
 
     metrics.bandwidth = prometheus:counter("bandwidth",
             "Total bandwidth in bytes consumed per service in APISIX",
-            {"type", "route", "service", "consumer", "node", unpack(extra_labels("bandwidth"))})
+            {"type", "route", "service", "consumer", "node", unpack(extra_labels("bandwidth"))},
+            bandwidth_metrics_exptime)
 
     if prometheus_enabled_in_stream then
         init_stream_metrics()
@@ -441,6 +456,7 @@ local function collect(ctx, stream_only)
     -- config server status
     local vars = ngx.var or {}
     local hostname = vars.hostname or ""
+    local version = core.version.VERSION or ""
 
     -- we can't get etcd index in metric server if only stream subsystem is enabled
     if config.type == "etcd" and not stream_only then
@@ -469,11 +485,10 @@ local function collect(ctx, stream_only)
         end
     end
 
-    metrics.node_info:set(1, gen_arr(hostname))
+    metrics.node_info:set(1, gen_arr(hostname, version))
 
     -- update upstream_status metrics
     local stats = control.get_health_checkers()
-    metrics.upstream_status:reset()
     for _, stat in ipairs(stats) do
         for _, node in ipairs(stat.nodes) do
             metrics.upstream_status:set(
@@ -516,6 +531,9 @@ _M.get_api = get_api
 
 
 function _M.export_metrics(stream_only)
+    if not prometheus then
+        core.response.exit(200, "{}")
+    end
     local api = get_api(false)
     local uri = ngx.var.uri
     local method = ngx.req.get_method()
@@ -538,5 +556,14 @@ end
 function _M.get_prometheus()
     return prometheus
 end
+
+
+function _M.destroy()
+    if prometheus ~= nil then
+        prometheus_bkp = core.table.deepcopy(prometheus)
+        prometheus = nil
+    end
+end
+
 
 return _M

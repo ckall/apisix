@@ -15,15 +15,18 @@
 -- limitations under the License.
 --
 
-local yaml = require("tinyyaml")
+local ngx = ngx
+local yaml = require("lyaml")
 local profile = require("apisix.core.profile")
 local util = require("apisix.cli.util")
+local schema = require("apisix.cli.schema")
+local default_conf = require("apisix.cli.config")
 local dkjson = require("dkjson")
+local pl_path = require("pl.path")
 
 local pairs = pairs
 local type = type
 local tonumber = tonumber
-local getmetatable = getmetatable
 local getenv = os.getenv
 local str_gmatch = string.gmatch
 local str_find = string.find
@@ -157,14 +160,6 @@ local function replace_by_reserved_env_vars(conf)
 end
 
 
-local function tinyyaml_type(t)
-    local mt = getmetatable(t)
-    if mt then
-        return mt.__type
-    end
-end
-
-
 local function path_is_multi_type(path, type_val)
     if str_sub(path, 1, 14) == "nginx_config->" and
             (type_val == "number" or type_val == "string") then
@@ -175,7 +170,7 @@ local function path_is_multi_type(path, type_val)
         return true
     end
 
-    if path == "apisix->ssl->key_encrypt_salt" then
+    if path == "apisix->data_encryption->keyring" then
         return true
     end
 
@@ -188,7 +183,7 @@ local function merge_conf(base, new_tab, ppath)
 
     for key, val in pairs(new_tab) do
         if type(val) == "table" then
-            if tinyyaml_type(val) == "null" then
+            if val == yaml.null then
                 base[key] = nil
 
             elseif tab_is_array(val) then
@@ -237,18 +232,7 @@ function _M.read_yaml_conf(apisix_home)
         profile.apisix_home = apisix_home .. "/"
     end
 
-    local local_conf_path = profile:yaml_path("config-default")
-    local default_conf_yaml, err = util.read_file(local_conf_path)
-    if not default_conf_yaml then
-        return nil, err
-    end
-
-    local default_conf = yaml.parse(default_conf_yaml)
-    if not default_conf then
-        return nil, "invalid config-default.yaml file"
-    end
-
-    local_conf_path = profile:customized_yaml_path()
+    local local_conf_path = profile:customized_yaml_path()
     if not local_conf_path then
         local_conf_path = profile:yaml_path("config")
     end
@@ -266,7 +250,7 @@ function _M.read_yaml_conf(apisix_home)
     end
 
     if not is_empty_file then
-        local user_conf = yaml.parse(user_conf_yaml)
+        local user_conf = yaml.load(user_conf_yaml)
         if not user_conf then
             return nil, "invalid config.yaml file"
         end
@@ -282,10 +266,18 @@ function _M.read_yaml_conf(apisix_home)
         end
     end
 
+    -- fill the default value by the schema
+    local ok, err = schema.validate(default_conf)
+    if not ok then
+        return nil, err
+    end
     if default_conf.deployment then
         default_conf.deployment.config_provider = "etcd"
         if default_conf.deployment.role == "traditional" then
             default_conf.etcd = default_conf.deployment.etcd
+            if default_conf.deployment.role_traditional.config_provider == "yaml" then
+                default_conf.deployment.config_provider = "yaml"
+            end
 
         elseif default_conf.deployment.role == "control_plane" then
             default_conf.etcd = default_conf.deployment.etcd
@@ -295,6 +287,8 @@ function _M.read_yaml_conf(apisix_home)
             default_conf.etcd = default_conf.deployment.etcd
             if default_conf.deployment.role_data_plane.config_provider == "yaml" then
                 default_conf.deployment.config_provider = "yaml"
+            elseif default_conf.deployment.role_data_plane.config_provider == "json" then
+                default_conf.deployment.config_provider = "json"
             elseif default_conf.deployment.role_data_plane.config_provider == "xds" then
                 default_conf.deployment.config_provider = "xds"
             end
@@ -302,17 +296,41 @@ function _M.read_yaml_conf(apisix_home)
         end
     end
 
-    if default_conf.deployment.config_provider == "yaml" then
+    --- using `not ngx` to check whether the current execution environment is apisix cli module,
+    --- because it is only necessary to parse and validate `apisix.yaml` in apisix cli.
+    if default_conf.deployment.config_provider == "yaml" and not ngx then
         local apisix_conf_path = profile:yaml_path("apisix")
         local apisix_conf_yaml, _ = util.read_file(apisix_conf_path)
         if apisix_conf_yaml then
-            local apisix_conf = yaml.parse(apisix_conf_yaml)
+            local apisix_conf = yaml.load(apisix_conf_yaml)
             if apisix_conf then
                 local ok, err = resolve_conf_var(apisix_conf)
                 if not ok then
                     return nil, err
                 end
             end
+        end
+    end
+
+    local apisix_ssl = default_conf.apisix.ssl
+    if apisix_ssl and apisix_ssl.ssl_trusted_certificate then
+        -- default value is set to "system" during schema validation
+        if apisix_ssl.ssl_trusted_certificate == "system" then
+            local trusted_certs_path, err = util.get_system_trusted_certs_filepath()
+            if not trusted_certs_path then
+                util.die(err)
+            end
+
+            apisix_ssl.ssl_trusted_certificate = trusted_certs_path
+        else
+            -- During validation, the path is relative to PWD
+            -- When Nginx starts, the path is relative to conf
+            -- Therefore we need to check the absolute version instead
+            local cert_path = pl_path.abspath(apisix_ssl.ssl_trusted_certificate)
+            if not pl_path.exists(cert_path) then
+                util.die("certificate path", cert_path, "doesn't exist\n")
+            end
+            apisix_ssl.ssl_trusted_certificate = cert_path
         end
     end
 

@@ -67,6 +67,13 @@ lua {
     {% if enabled_stream_plugins["prometheus"] then %}
     lua_shared_dict prometheus-metrics {* meta.lua_shared_dict["prometheus-metrics"] *};
     {% end %}
+    {% if standalone_with_admin_api then %}
+    lua_shared_dict standalone-config {* meta.lua_shared_dict["standalone-config"] *};
+    {% end %}
+    {% if status then %}
+    lua_shared_dict status-report {* meta.lua_shared_dict["status-report"] *};
+    {% end %}
+    lua_shared_dict nacos 10m;
 }
 
 {% if enabled_stream_plugins["prometheus"] and not enable_http then %}
@@ -139,6 +146,10 @@ stream {
     lua_shared_dict lrucache-lock-stream {* stream.lua_shared_dict["lrucache-lock-stream"] *};
     lua_shared_dict etcd-cluster-health-check-stream {* stream.lua_shared_dict["etcd-cluster-health-check-stream"] *};
     lua_shared_dict worker-events-stream {* stream.lua_shared_dict["worker-events-stream"] *};
+
+    {% if stream.lua_shared_dict["upstream-healthcheck-stream"] then %}
+    lua_shared_dict upstream-healthcheck-stream {* stream.lua_shared_dict["upstream-healthcheck-stream"] *};
+    {% end %}
 
     {% if enabled_discoveries["tars"] then %}
     lua_shared_dict tars-stream {* stream.lua_shared_dict["tars-stream"] *};
@@ -222,8 +233,12 @@ stream {
         ssl_certificate      {* ssl.ssl_cert *};
         ssl_certificate_key  {* ssl.ssl_cert_key *};
 
+        ssl_client_hello_by_lua_block {
+            apisix.ssl_client_hello_phase()
+        }
+
         ssl_certificate_by_lua_block {
-            apisix.stream_ssl_phase()
+            apisix.ssl_phase()
         }
         {% end %}
 
@@ -287,11 +302,26 @@ http {
     lua_shared_dict tars {* http.lua_shared_dict["tars"] *};
     {% end %}
 
+
+    {% if http.lua_shared_dict["plugin-ai-rate-limiting"] then %}
+    lua_shared_dict plugin-ai-rate-limiting {* http.lua_shared_dict["plugin-ai-rate-limiting"] *};
+    {% else %}
+    lua_shared_dict plugin-ai-rate-limiting 10m;
+    {% end %}
+
+    {% if http.lua_shared_dict["plugin-ai-rate-limiting"] then %}
+    lua_shared_dict plugin-ai-rate-limiting-reset-header {* http.lua_shared_dict["plugin-ai-rate-limiting-reset-header"] *};
+    {% else %}
+    lua_shared_dict plugin-ai-rate-limiting-reset-header 10m;
+    {% end %}
+
     {% if enabled_plugins["limit-conn"] then %}
     lua_shared_dict plugin-limit-conn {* http.lua_shared_dict["plugin-limit-conn"] *};
+    lua_shared_dict plugin-limit-conn-redis-cluster-slot-lock {* http.lua_shared_dict["plugin-limit-conn-redis-cluster-slot-lock"] *};
     {% end %}
 
     {% if enabled_plugins["limit-req"] then %}
+    lua_shared_dict plugin-limit-req-redis-cluster-slot-lock {* http.lua_shared_dict["plugin-limit-req-redis-cluster-slot-lock"] *};
     lua_shared_dict plugin-limit-req {* http.lua_shared_dict["plugin-limit-req"] *};
     {% end %}
 
@@ -333,8 +363,16 @@ http {
     lua_shared_dict access-tokens {* http.lua_shared_dict["access-tokens"] *}; # cache for service account access tokens
     {% end %}
 
+    {% if enabled_plugins["ocsp-stapling"] then %}
+    lua_shared_dict ocsp-stapling {* http.lua_shared_dict["ocsp-stapling"] *}; # cache for ocsp-stapling
+    {% end %}
+
     {% if enabled_plugins["ext-plugin-pre-req"] or enabled_plugins["ext-plugin-post-req"] then %}
     lua_shared_dict ext-plugin {* http.lua_shared_dict["ext-plugin"] *}; # cache for ext-plugin
+    {% end %}
+
+    {% if enabled_plugins["mcp-bridge"] then %}
+    lua_shared_dict mcp-session {* http.lua_shared_dict["mcp-session"] *}; # cache for mcp-session
     {% end %}
 
     {% if config_center == "xds" then %}
@@ -412,7 +450,6 @@ http {
     {% if ssl.ssl_trusted_certificate ~= nil then %}
     lua_ssl_trusted_certificate {* ssl.ssl_trusted_certificate *};
     {% end %}
-
     # http configuration snippet starts
     {% if http_configuration_snippet then %}
     {* http_configuration_snippet *}
@@ -521,6 +558,23 @@ http {
     }
     {% end %}
 
+    {% if status then %}
+    server {
+        listen {* status_server_addr *} enable_process=privileged_agent;
+        access_log off;
+        location /status {
+            content_by_lua_block {
+                apisix.status()
+            }
+        }
+        location /status/ready {
+            content_by_lua_block {
+                apisix.status_ready()
+            }
+        }
+    }
+    {% end %}
+
     {% if enabled_plugins["prometheus"] and prometheus_server_addr then %}
     server {
         {% if use_apisix_base then %}
@@ -583,19 +637,35 @@ http {
         set $upstream_host               $http_host;
         set $upstream_uri                '';
 
-        location /apisix/admin {
-            {%if allow_admin then%}
-                {% for _, allow_ip in ipairs(allow_admin) do %}
-                allow {*allow_ip*};
-                {% end %}
-            {%else%}
-                allow all;
-            {%end%}
+        {%if allow_admin then%}
+        {% for _, allow_ip in ipairs(allow_admin) do %}
+        allow {*allow_ip*};
+        {% end %}
+        deny all;
+        {%else%}
+        allow all;
+        {%end%}
 
+        location /apisix/admin {
             content_by_lua_block {
                 apisix.http_admin()
             }
         }
+
+        {% if enable_admin_ui then %}
+        location = /ui {
+            return 301 /ui/;
+        }
+        location ^~ /ui/ {
+            rewrite ^/ui/(.*)$ /$1 break;
+            root {* apisix_lua_home *}/ui;
+            try_files $uri /index.html =404;
+            gzip on;
+            gzip_types text/css application/javascript application/json;
+            expires 7200s;
+            add_header Cache-Control "private,max-age=7200";
+        }
+        {% end %}
     }
     {% end %}
 
@@ -621,12 +691,23 @@ http {
     {% end %}
 
     server {
+        {% if enable_http2 then %}
+        http2 on;
+        {% end %}
+        {% if enable_http3_in_server_context then %}
+        http3 on;
+        {% end %}
         {% for _, item in ipairs(node_listen) do %}
-        listen {* item.ip *}:{* item.port *} default_server {% if item.enable_http2 then %} http2 {% end %} {% if enable_reuseport then %} reuseport {% end %};
+        listen {* item.ip *}:{* item.port *} default_server {% if enable_reuseport then %} reuseport {% end %};
         {% end %}
         {% if ssl.enable then %}
         {% for _, item in ipairs(ssl.listen) do %}
-        listen {* item.ip *}:{* item.port *} ssl default_server {% if item.enable_http2 then %} http2 {% end %} {% if enable_reuseport then %} reuseport {% end %};
+        {% if item.enable_http3 then %}
+        listen {* item.ip *}:{* item.port *} quic default_server {% if enable_reuseport then %} reuseport {% end %};
+        listen {* item.ip *}:{* item.port *} ssl default_server;
+        {% else %}
+        listen {* item.ip *}:{* item.port *} ssl default_server {% if enable_reuseport then %} reuseport {% end %};
+        {% end %}
         {% end %}
         {% end %}
         {% if proxy_protocol and proxy_protocol.listen_http_port then %}
@@ -689,11 +770,11 @@ http {
 
         {% if ssl.enable then %}
         ssl_client_hello_by_lua_block {
-            apisix.http_ssl_client_hello_phase()
+            apisix.ssl_client_hello_phase()
         }
 
         ssl_certificate_by_lua_block {
-            apisix.http_ssl_phase()
+            apisix.ssl_phase()
         }
         {% end %}
 
@@ -911,7 +992,6 @@ http {
     {% if http_end_configuration_snippet then %}
     {* http_end_configuration_snippet *}
     {% end %}
-    #  include /apisix/conf/nginx/*.conf;
     # http end configuration snippet ends
 }
 {% end %}

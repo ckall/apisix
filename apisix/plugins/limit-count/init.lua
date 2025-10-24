@@ -19,6 +19,9 @@ local apisix_plugin = require("apisix.plugin")
 local tab_insert = table.insert
 local ipairs = ipairs
 local pairs = pairs
+local redis_schema = require("apisix.utils.redis-schema")
+local policy_to_additional_properties = redis_schema.schema
+local get_phase = ngx.get_phase
 
 local limit_redis_cluster_new
 local limit_redis_new
@@ -40,64 +43,30 @@ local group_conf_lru = core.lrucache.new({
     type = 'plugin',
 })
 
-local policy_to_additional_properties = {
-    redis = {
-        properties = {
-            redis_host = {
-                type = "string", minLength = 2
-            },
-            redis_port = {
-                type = "integer", minimum = 1, default = 6379,
-            },
-            redis_username = {
-                type = "string", minLength = 1,
-            },
-            redis_password = {
-                type = "string", minLength = 0,
-            },
-            redis_database = {
-                type = "integer", minimum = 0, default = 0,
-            },
-            redis_timeout = {
-                type = "integer", minimum = 1, default = 1000,
-            },
-            redis_ssl = {
-                type = "boolean", default = false,
-            },
-            redis_ssl_verify = {
-                type = "boolean", default = false,
-            },
+local metadata_defaults = {
+    limit_header = "X-RateLimit-Limit",
+    remaining_header = "X-RateLimit-Remaining",
+    reset_header = "X-RateLimit-Reset",
+}
+
+local metadata_schema = {
+    type = "object",
+    properties = {
+        limit_header = {
+            type = "string",
+            default = metadata_defaults.limit_header,
         },
-        required = {"redis_host"},
-    },
-    ["redis-cluster"] = {
-        properties = {
-            redis_cluster_nodes = {
-                type = "array",
-                minItems = 1,
-                items = {
-                    type = "string", minLength = 2, maxLength = 100
-                },
-            },
-            redis_password = {
-                type = "string", minLength = 0,
-            },
-            redis_timeout = {
-                type = "integer", minimum = 1, default = 1000,
-            },
-            redis_cluster_name = {
-                type = "string",
-            },
-            redis_cluster_ssl = {
-                type = "boolean", default = false,
-            },
-            redis_cluster_ssl_verify = {
-                type = "boolean", default = false,
-            },
+        remaining_header = {
+            type = "string",
+            default = metadata_defaults.remaining_header,
         },
-        required = {"redis_cluster_nodes", "redis_cluster_name"},
+        reset_header = {
+            type = "string",
+            default = metadata_defaults.reset_header,
+        },
     },
 }
+
 local schema = {
     type = "object",
     properties = {
@@ -147,7 +116,8 @@ local schema = {
 local schema_copy = core.table.deepcopy(schema)
 
 local _M = {
-    schema = schema
+    schema = schema,
+    metadata_schema = metadata_schema,
 }
 
 
@@ -156,7 +126,12 @@ local function group_conf(conf)
 end
 
 
-function _M.check_schema(conf)
+
+function _M.check_schema(conf, schema_type)
+    if schema_type == core.schema.TYPE_METADATA then
+        return core.schema.check(metadata_schema, conf)
+    end
+
     local ok, err = core.schema.check(schema, conf)
     if not ok then
         return false, err
@@ -259,8 +234,9 @@ local function gen_limit_obj(conf, ctx, plugin_name)
     return core.lrucache.plugin_ctx(lrucache, ctx, extra_key, create_limit_obj, conf, plugin_name)
 end
 
-function _M.rate_limit(conf, ctx, name, cost)
+function _M.rate_limit(conf, ctx, name, cost, dry_run)
     core.log.info("ver: ", ctx.conf_version)
+    core.log.info("conf: ", core.json.delay_encode(conf, true))
 
     local lim, err = gen_limit_obj(conf, ctx, name)
 
@@ -301,19 +277,35 @@ function _M.rate_limit(conf, ctx, name, cost)
 
     local delay, remaining, reset
     if not conf.policy or conf.policy == "local" then
-        delay, remaining, reset = lim:incoming(key, true, conf, cost)
+        delay, remaining, reset = lim:incoming(key, not dry_run, conf, cost)
     else
         delay, remaining, reset = lim:incoming(key, cost)
     end
+
+    local metadata = apisix_plugin.plugin_metadata("limit-count")
+    if metadata then
+        metadata = metadata.value
+    else
+        metadata = metadata_defaults
+    end
+    core.log.info("limit-count plugin-metadata: ", core.json.delay_encode(metadata))
+
+    local set_limit_headers = {
+        limit_header = conf.limit_header or metadata.limit_header,
+        remaining_header = conf.remaining_header or metadata.remaining_header,
+        reset_header = conf.reset_header or metadata.reset_header,
+    }
+    local phase = get_phase()
+    local set_header = phase ~= "log"
 
     if not delay then
         local err = remaining
         if err == "rejected" then
             -- show count limit header when rejected
-            if conf.show_limit_quota_header then
-                core.response.set_header("X-RateLimit-Limit", conf.count,
-                    "X-RateLimit-Remaining", 0,
-                    "X-RateLimit-Reset", reset)
+            if conf.show_limit_quota_header and set_header then
+                core.response.set_header(set_limit_headers.limit_header, conf.count,
+                set_limit_headers.remaining_header, 0,
+                set_limit_headers.reset_header, reset)
             end
 
             if conf.rejected_msg then
@@ -329,10 +321,10 @@ function _M.rate_limit(conf, ctx, name, cost)
         return 500, {error_msg = "failed to limit count"}
     end
 
-    if conf.show_limit_quota_header then
-        core.response.set_header("X-RateLimit-Limit", conf.count,
-            "X-RateLimit-Remaining", remaining,
-            "X-RateLimit-Reset", reset)
+    if conf.show_limit_quota_header and set_header then
+        core.response.set_header(set_limit_headers.limit_header, conf.count,
+            set_limit_headers.remaining_header, remaining,
+            set_limit_headers.reset_header, reset)
     end
 end
 

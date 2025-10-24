@@ -100,11 +100,7 @@ return function (apisix_home, pkg_cpath_org, pkg_path_org)
     end
 
     local min_etcd_version = "3.4.0"
-    print("APISIX_HOME: ", apisix_home)
-    print("openresty_args: ", openresty_args)
-    --print("openresty_info: ", or_info)
-    print("use_apisix_base: ", use_apisix_base)
-    print("ulimit: ", ulimit)
+
     return {
         apisix_home = apisix_home,
         is_root_path = is_root_path,

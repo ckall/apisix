@@ -110,8 +110,6 @@ do
                     for _, route in ipairs(items) do
                         local hit = match_addrs(route, vars)
                         if hit then
-                            route.value.remote_addr_matcher = nil
-                            route.value.server_addr_matcher = nil
                             ctx.matched_route = route
                             return true
                         end
@@ -177,8 +175,6 @@ do
         for _, route in ipairs(other_routes) do
             local hit = match_addrs(route, api_ctx.var)
             if hit then
-                route.value.remote_addr_matcher = nil
-                route.value.server_addr_matcher = nil
                 api_ctx.matched_route = route
                 return true
             end
@@ -237,7 +233,9 @@ function _M.stream_init_worker(filter)
     user_routes, err = core.config.new("/stream_routes", {
             automatic = true,
             item_schema = core.schema.stream_route,
-            checker = stream_route_checker,
+            checker = function(item)
+                return stream_route_checker(item)
+            end,
             filter = filter,
         })
 

@@ -35,7 +35,7 @@ sudo add-apt-repository -y "deb https://openresty.org/package/${arch_path}ubuntu
 sudo add-apt-repository -y "deb http://repos.apiseven.com/packages/${arch_path}debian bullseye main"
 
 sudo apt-get update
-sudo apt-get install -y libldap2-dev openresty-pcre-dev openresty-zlib-dev build-essential gcc g++ cpanminus
+sudo apt-get install -y openresty-pcre-dev openresty-zlib-dev build-essential gcc g++ cpanminus
 
 SSL_LIB_VERSION=${SSL_LIB_VERSION-openssl}
 ENABLE_FIPS=${ENABLE_FIPS:-"false"}
@@ -51,10 +51,7 @@ if [ "$OPENRESTY_VERSION" == "source" ]; then
     fi
 fi
 
-export runtime_version=${APISIX_RUNTIME}
-wget "https://raw.githubusercontent.com/api7/apisix-build-tools/apisix-runtime/${APISIX_RUNTIME}/build-apisix-runtime.sh"
-chmod +x build-apisix-runtime.sh
-./build-apisix-runtime.sh latest
+install_apisix_runtime
 
 if [ ! "$ENABLE_FIPS" == "true" ]; then
 curl -o /usr/local/openresty/openssl3/ssl/openssl.cnf \

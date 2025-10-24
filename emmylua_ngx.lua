@@ -22,21 +22,20 @@ _ENV = {}
 ---设置一个函数的环境
 ---（1）当第一个参数为一个函数时，表示设置该函数的环境
 ---（2）当第一个参数为一个数字时，为1代表当前函数，2代表调用自己的函数，3代表调用自己的函数的函数，以此类推
-function setfenv(f,table)
+function setfenv(f, table)
 end
-
 
 ---功能：与load类似，但装载的内容是一个字串
 --如：assert(loadstring(s))()
 ---@param string string @可选参数
 ---@return fun() @返回string编译后的方法
-function loadstring (string,chunkname)
+function loadstring(string, chunkname)
 end
 
 ---功能：返回指定表的索引的值,i为起始索引，j为结束索引
 ---注：本函数只能用于以数字索引访问的表,否则只会返回nil 如：t={"1","cash"}
 ---@param list table[]
-function unpack (list,i,j)
+function unpack(list, i, j)
 end
 
 ---循环table,table不必是数字索引
@@ -44,7 +43,7 @@ end
 ---
 ---@param tb1 table @需循环的数据
 ---@param func fun(k:any,v:any):void @处理每个键值的函数
-function table.foreach(tb1,func)
+function table.foreach(tb1, func)
 end
 
 ---循环table,table必须是数字索引
@@ -52,7 +51,7 @@ end
 ---
 ---@param tb1 table @需循环的数据
 ---@param func fun(k:any,v:any):void @处理每个键值的函数
-function table.foreachi(tb1,func)
+function table.foreachi(tb1, func)
 end
 
 ---给 lua table 预分配空间。否则 table
@@ -61,7 +60,7 @@ end
 ---table.new(10, 0) 或者 table.new(0, 10) 这样的，后者是 hash 性质的 table
 ---@param narr number @预分配多少数组型空间
 ---@param nrec number @预分配多少hash型空间
-function table.new(narr,nrec)
+function table.new(narr, nrec)
 end
 
 ---清理一个lua table
@@ -76,9 +75,10 @@ local proc = {}
 ---pid = proc:pid()
 function proc:pid()
 end
+
 ---设置超时时间
 ---默认10000毫秒
-function proc:set_timeouts(write_timeout,stdout_read_timeout,stderr_read_timeout,wait_timeout)
+function proc:set_timeouts(write_timeout, stdout_read_timeout, stderr_read_timeout, wait_timeout)
 end
 
 ---@class reason @pipe退出原因定义,一个字符串,可选值 exit/signal
@@ -119,6 +119,7 @@ end
 --`"closed"`.
 function proc:stderr_read_all()
 end
+
 ---读取全部子进程输出流
 ---data, err, partial = proc:stdout_read_all()
 function proc:stdout_read_all()
@@ -152,6 +153,7 @@ end
 ---如果接收到的数据超过了'max'字节，则此方法将返回完全为'max'字节的数据。底层接收缓冲区中的剩余数据可以通过后续的读取操作获取。
 function proc:stderr_read_any(max)
 end
+
 ---读取输出流,读取到指定数量就返回
 --data, err = proc:stdout_read_any(max)
 function proc:stdout_read_any(max)
@@ -169,7 +171,7 @@ ngx.thread = {}
 ---ngx.thread.spawn 返回后，新创建的“轻线程”将开始异步方式在各个 I/O 事件上执行。
 ---
 ---在 rewrite_by_lua、access_by_lua 中的 Lua 代码块是在 ngx_lua 自动创建的“轻线程”样板执行的。这类样板的“轻线程”也被称为“入口线程”。
-function ngx.thread.spawn(func,arg1,arg2,...)
+function ngx.thread.spawn(func, arg1, arg2, ...)
 end
 
 ---语法: ok, res1, res2, ... = ngx.thread.wait(thread1, thread2, ...)
@@ -183,7 +185,7 @@ end
 ---返回值与 coroutine.resume 是完全一样的，也就是说，第一个返回值是一个布尔值，说明“轻线程”的终止是成功还是异常，随后的返回值是 Lua 函数的返回结果，该 Lua 函数是被用来产生“轻线程”（成功情况下）或错误对象（失败情况下）。
 ---
 ---只有直属“父协程”才能等待它的子“轻线程”，否则将会有 Lua 异常抛出。
-function ngx.thread.wait(thread1,thread2,...)
+function ngx.thread.wait(thread1, thread2, ...)
 end
 
 ---语法: ok, err = ngx.thread.kill(thread)
@@ -287,7 +289,7 @@ ngx.header = {}
 ngx.header["Content-Type"] = 'text/html'
 ngx.header.content_type = 'text/plain'
 ---设置一个客户端cookie
-ngx.header['Set-Cookie'] = { 'a=32; path=/','b=4; path=/' }
+ngx.header['Set-Cookie'] = { 'a=32; path=/', 'b=4; path=/' }
 
 ngx.resp = {}
 ---语法: headers = ngx.resp.get_headers(max_headers?, raw?)
@@ -302,7 +304,7 @@ ngx.resp = {}
 --- end
 ---此函数与 ngx.req.get_headers 有相似之处，唯一区别是获取的是响应头信息而不是请求头信息。
 ---@return table<string,string>
-function ngx.resp.get_headers(max_headers,raw)
+function ngx.resp.get_headers(max_headers, raw)
 end
 
 ngx.req = {}
@@ -411,7 +413,7 @@ end
 ---换句话说，当 jump 参数是 true (默认值 false) 时，此函数将不会返回，它会让 Nginx 在之后的 post-rewrite 执行阶段，
 ---根据新的 URI 重新搜索 location，并跳转到新 location。
 ---默认值时，location 跳转不会被触发，只有当前请求的 URI 被改写。当 jump 参数值为 false 或不存在时，此函数将正常返回，但没有返回值。
-function ngx.req.set_uri(uri,jump)
+function ngx.req.set_uri(uri, jump)
 end
 
 ---语法: ngx.req.set_uri_args(args)
@@ -480,7 +482,7 @@ end
 ---返回一个 Lua table，包含当前请求的所有请求头信息。
 ---请注意，ngx.var.HEADER API 使用 nginx 内核 $http_HEADER 变量，在读取单个请求头信息时更加适用。
 ---@return table<string,string>
-function ngx.req.get_headers(max_headers,raw)
+function ngx.req.get_headers(max_headers, raw)
 end
 
 ---语法: ngx.req.set_header(header_name, header_value)
@@ -494,7 +496,7 @@ end
 ---将生成两个新的请求头信息：
 --- Foo: a
 --- Foo: abc
-function ngx.req.set_header(header_name,header_value)
+function ngx.req.set_header(header_name, header_value)
 end
 
 ---语法: ngx.req.read_body()
@@ -596,7 +598,7 @@ end
 ---这个函数在 v0.3.1rc18 版本中首次引入。
 ---
 ---更多用法请参考 ngx.req.set_body_data。
-function ngx.req.set_body_file(file_name,auto_clean)
+function ngx.req.set_body_file(file_name, auto_clean)
 end
 
 ---语法: ngx.exec(uri, args?)
@@ -615,7 +617,7 @@ end
 ---
 --- ngx.exec("/foo", { a = 3, b = "hello world" })
 ---该结果和上一个示例是一样的。
-function ngx.exec(uri,args)
+function ngx.exec(uri, args)
 end
 
 ---语法: ngx.redirect(uri, status?)
@@ -633,7 +635,7 @@ end
 ---默认使用 302 （ngx.HTTP_MOVED_TEMPORARILY）。
 ---
 ---假设当前服务名是 localhost 并且监听端口是 1984，这里有个例子：
-function ngx.redirect(uri,status)
+function ngx.redirect(uri, status)
 end
 
 ---语法: ok, err = ngx.print(...)
@@ -691,7 +693,7 @@ ngx.DEBUG = 9
 ---log_level 参数可以使用类似 ngx.ERR 和 ngx.WARN 的常量。更多信息请参考 Nginx log level constants。
 ---在 Nginx 内核中硬编码限制了单条错误信息最长为 2048 字节。这个长度包含了最后的换行符和开始的时间戳。
 ---如果信息长度超过这个限制，Nginx 将把信息文本截断。这个限制可以通过修改 Nginx 源码中 src/core/ngx_log.h 文件中的 NGX_MAX_ERROR_STR 宏定义调整。
-function ngx.log(log_level,...)
+function ngx.log(log_level, ...)
 end
 
 ---语法: ok, err = ngx.flush(wait?)
@@ -838,7 +840,7 @@ end
 --- local args = ngx.decode_args(str, 0)
 ---强烈不推荐移除 max_args 限制。
 ---@return table
-function ngx.decode_args(str,max_args)
+function ngx.decode_args(str, max_args)
 end
 
 ---语法: newstr = ngx.encode_base64(str, no_padding?)
@@ -849,7 +851,7 @@ end
 ---
 ---自 0.9.16 版本后，引入了一个布尔值参数 no_padding 用来控制是否需要编码数据填充 等号 字符串（默认为 false，代表需要填充）。
 ---@return string
-function ngx.encode_base64(str,no_padding)
+function ngx.encode_base64(str, no_padding)
 end
 
 ---语法: newstr = ngx.decode_base64(str)
@@ -901,7 +903,7 @@ end
 ---将会输出
 ---
 ---R/pvxzHC4NLtj7S+kXFg/NePTmk=
-function ngx.hmac_sha1(secret_key,str)
+function ngx.hmac_sha1(secret_key, str)
 end
 
 ---语法: digest = ngx.md5(str)
@@ -1181,7 +1183,7 @@ ngx.re = {}
 ---自 0.9.4 版本开始，此函数接受第五个参数，res_table，让调用者可以自己指定存储所有匹配结果的 Lua 表。自 0.9.6 版本开始，调用者需要自己确保这个表是空的。这个功能对表预分配、重用以及节省 Lua 回收机制 (GC) 非常有用。
 ---
 ---这个功能最早出现在 v0.2.1rc11 版本中。
-function ngx.re.match(subject,regex,options,ctx,res_table)
+function ngx.re.match(subject, regex, options, ctx, res_table)
 end
 
 ---语法: from, to, err = ngx.re.find(subject, regex, options?, ctx?, nth?)
@@ -1216,7 +1218,7 @@ end
 --- end
 ---此 API 函数自 v0.9.2 版开始提供。
 ---@return number,number,string @from,to,err
-function ngx.re.find(subject,regex,options,ctx,nth)
+function ngx.re.find(subject, regex, options, ctx, nth)
 end
 
 ---正则匹配替换,不同的是会整个字符串替换
@@ -1285,7 +1287,7 @@ end
 ---这个方法需要在 Nginx 中启用 PCRE 库。 (Known Issue With Special Escaping Sequences)。
 ---
 ---这个功能最早出现在 v0.2.1rc12 版本中。
-function ngx.re.gmatch(subject,regex,options)
+function ngx.re.gmatch(subject, regex, options)
 end
 
 ---语法: newstr, n, err = ngx.re.sub(subject, regex, replace, options?)
@@ -1333,7 +1335,7 @@ end
 ---这个方法需要在 Nginx 中启用 PCRE 库。 (Known Issue With Special Escaping Sequences).
 ---
 ---这个功能最早出现在 v0.2.1rc13 版本中。
-function ngx.re.sub(subject,regex,replace,options)
+function ngx.re.sub(subject, regex, replace, options)
 end
 
 ---语法: newstr, n, err = ngx.re.gsub(subject, regex, replace, options?)
@@ -1361,7 +1363,7 @@ end
 ---这个方法需要在 Nginx 中启用 PCRE 库。 (Known Issue With Special Escaping Sequences).
 ---
 ---这个功能最早出现在 v0.2.1rc15 版本中。
-function ngx.re.gsub(subject,regex,replace,options)
+function ngx.re.gsub(subject, regex, replace, options)
 end
 
 ---@class ngx.shared @共享字典对象
@@ -1435,7 +1437,7 @@ end
 ---@param exptime number|nil
 ---@param flags number|nil
 ---@return boolean,string,boolean @success,err,forcible
-function shared:set(key,value,exptime,flags)
+function shared:set(key, value, exptime, flags)
 end
 
 ---设置全局内存值,存在则返回no memory错误
@@ -1450,7 +1452,7 @@ end
 ---err 错误描述 no memory exists
 ---exptime 赋值后多久过期,默认0永久,单位秒
 ---flags 自定义的用户标识默认为0
-function shared:safe_set(key,value,exptime,flags)
+function shared:safe_set(key, value, exptime, flags)
 end
 
 ---语法: success, err, forcible = ngx.shared.DICT:add(key, value, exptime?, flags?)
@@ -1463,20 +1465,20 @@ end
 ---@param value string
 ---@param exptime number
 ---@return boolean,string @ok,err
-function shared:add(key,value,exptime,flags)
+function shared:add(key, value, exptime, flags)
 end
 
 ---语法: ok, err = ngx.shared.DICT:safe_add(key, value, exptime?, flags?)
 ---环境: init_by_lua*, set_by_lua*, rewrite_by_lua*, access_by_lua*, content_by_lua*, header_filter_by_lua*, body_filter_by_lua*, log_by_lua*, ngx.timer.*, balancer_by_lua*, ssl_certificate_by_lua*, ssl_session_fetch_by_lua*, ssl_session_store_by_lua*
 ---类似 add 方法，但当共享内存区块存储空间不足时，不覆盖 (最近最少使用的) 有效的项 (非过期项)。此时，它将返回 nil 和字符串 "no memory" (内存不足)。
-function shared:safe_add(key,value,exptime,flags)
+function shared:safe_add(key, value, exptime, flags)
 end
 
 ---语法: success, err, forcible = ngx.shared.DICT:replace(key, value, exptime?, flags?)
 ---环境: init_by_lua*, set_by_lua*, rewrite_by_lua*, access_by_lua*, content_by_lua*, header_filter_by_lua*, body_filter_by_lua*, log_by_lua*, ngx.timer.*, balancer_by_lua*, ssl_certificate_by_lua*, ssl_session_fetch_by_lua*, ssl_session_store_by_lua*
 ---与 set 方法类似，但仅当存储字典 ngx.shared.DICT 中 存在 该 key 时执行存储 key-value 对。
 ---如果参数 key 在字典中 不 存在 (或已经过期)，success 返回值为 false，同时 err 返回 "not found" (没找到)。
-function shared:replace(key,value,exptime,flags)
+function shared:replace(key, value, exptime, flags)
 end
 
 ---ngx.shared.DICT.delete
@@ -1511,7 +1513,7 @@ end
 ---@param value number
 ---@param init number|nil
 ---@return number,string,boolean @newval,err,forcible
-function shared:incr(key,value,init)
+function shared:incr(key, value, init)
 end
 
 ---syntax: length, err = ngx.shared.DICT:lpush(key, value)
@@ -1523,7 +1525,7 @@ end
 ---如果 key 不存在，会在执行插入操作之前创建一个空的链表。当 key 已经有值但不是链表，会返回 nil 和 "value not a list"。
 ---
 ---当共享内存区间中的存储空间不足时，它永远不会覆盖这里未过期数据（最近最少使用）。这种情况，它将直接返回 nil 和字符串 "no memory"。
-function shared:lpush(key,value)
+function shared:lpush(key, value)
 end
 
 ---syntax: length, err = ngx.shared.DICT:rpush(key, value)
@@ -1531,7 +1533,7 @@ end
 ---context: init_by_lua*, set_by_lua*, rewrite_by_lua*, access_by_lua*, content_by_lua*, header_filter_by_lua*, body_filter_by_lua*, log_by_lua*, ngx.timer.*, balancer_by_lua*, ssl_certificate_by_lua*, ssl_session_fetch_by_lua*, ssl_session_store_by_lua*
 ---
 ---与 lpush 方法相似，但该方法将指定 value （数字或字符串） 插入到命名为 key 的链表末尾。
-function shared:rpush(key,value)
+function shared:rpush(key, value)
 end
 
 ---syntax: val, err = ngx.shared.DICT:lpop(key)
@@ -1724,7 +1726,7 @@ ngx.timer = {}
 ---@param delay number
 ---@param callback function
 ---@param user_arg1 any
-function ngx.timer.at(delay,callback,user_arg1,user_arg2,...)
+function ngx.timer.at(delay, callback, user_arg1, user_arg2, ...)
 end
 
 ---语法: count = ngx.timer.running_count()
@@ -1897,7 +1899,7 @@ ngx.var.remote_port = 80
 ---二进制的客户端地址
 ngx.var.binary_remote_addr = ""
 ---请求body
-ngx.var.request_body = ""---指的就是从接受用户请求的第一个字节到发送完响应数据的时间，即包括接收请求数据时间、程序响应时间、输出响应数据时间
+ngx.var.request_body = "" ---指的就是从接受用户请求的第一个字节到发送完响应数据的时间，即包括接收请求数据时间、程序响应时间、输出响应数据时间
 ngx.var.request_time = ""
 ---请求连接,不包含域名信息
 ngx.var.uri = ""
@@ -1988,7 +1990,7 @@ end
 --- return sock
 ---这里没办法使用 settimeout 方法来指定连接时间，只能通过指令 lua_socket_connect_timeout 预先配置作为替代方案。
 ---@return ngx.tcpsock,string @创建的连接,错误消息
-function ngx.socket.connect(ip_host,port)
+function ngx.socket.connect(ip_host, port)
 end
 
 ---@class ngx.tcpsock
@@ -2048,7 +2050,7 @@ local tcpsock = {}
 ---pool 对即将被使用的连接池指定一个名字。如果没有指定该参数，连接池的名字将自动生成，使用 "<host>:<port>" 或 "<unix-socket-path>" 的命名方式。
 ---@param options_table table|void @可选选项配置
 ---@return boolean,string @ok,err @连接结果,错误消息
-function tcpsock:connect(ip_host,port,options_table)
+function tcpsock:connect(ip_host, port, options_table)
 end
 
 ---语法: session, err = tcpsock:sslhandshake(reused_session?, server_name?, ssl_verify?)
@@ -2069,7 +2071,7 @@ end
 ---@param server_name string|void @SNI服务名
 ---@param ssl_verify boolean|void @是否验证证书
 ---@return boolean|string,string @session, err @连接结果,错误消息
-function tcpsock:sslhandshake(reused_session,server_name,ssl_verify)
+function tcpsock:sslhandshake(reused_session, server_name, ssl_verify)
 end
 
 ---语法: bytes, err = tcpsock:send(data)
@@ -2196,7 +2198,7 @@ end
 --- ngx.say(data)
 ---然后对于数据数据流 "hello world _END_ blah blah blah" ，根据上面的示例代码将得到 hello world _END_ 的输出，包含规则字符串 _END_ 自身。
 ---@return fun(number) @迭代的 Lua 函数，该函数可以被调用读取数据流直到指定的规则或有错误发生 local data, err, partial = reader()
-function tcpsock:receiveuntil(pattern,options)
+function tcpsock:receiveuntil(pattern, options)
 end
 
 ---语法: ok, err = tcpsock:close()
@@ -2237,7 +2239,7 @@ end
 ---推荐使用 settimeouts 方法替代 settimeout 。
 ---
 ---注意：该方法 不 影响 lua_socket_keepalive_timeout 设定，这种情况应调用 setkeepalive 方法完成目的。
-function tcpsock:settimeouts(connect_timeout,send_timeout,read_timeout)
+function tcpsock:settimeouts(connect_timeout, send_timeout, read_timeout)
 end
 
 ---语法: tcpsock:setoption(option, value?)
@@ -2247,7 +2249,7 @@ end
 ---该函数是为兼容 LuaSocket API，目前没做任何事情。它的功能将在将来实现。
 ---
 ---该特性是在 v0.5.0rc1 版本首次引入的。
-function tcpsock:setoption(option,value)
+function tcpsock:setoption(option, value)
 end
 
 ---语法: ok, err = tcpsock:setkeepalive(timeout?, size?)
@@ -2276,7 +2278,7 @@ end
 ---@param timeout number @毫秒单位的空闲时间设定,0为无限
 ---@param size number|void @连接池大小
 ---@return boolean,string @ok, err @设置结果,错误消息
-function tcpsock:setkeepalive(timeout,size)
+function tcpsock:setkeepalive(timeout, size)
 end
 
 ---语法: count, err = tcpsock:getreusedtimes()
@@ -2518,10 +2520,8 @@ end
 ---cjson.encode({ [1000] = "excessively sparse" })
 ---- Returns: '{"1000":"excessively sparse"}'
 ---配置,编码稀疏数组设置
-function cjson.encode_sparse_array(convert,ratio,safe)
+function cjson.encode_sparse_array(convert, ratio, safe)
 end
-
-
 
 ---This fork of mpx/lua-cjson is included in the OpenResty bundle and includes a few bugfixes and improvements,
 ---especially to facilitate the encoding of empty tables as JSON Arrays.
@@ -2605,4 +2605,3 @@ cjson._VERSION = "2.1.0"
 ---4.3. null
 ---Lua CJSON decodes JSON null as a Lua lightuserdata NULL pointer. cjson.null is provided for comparison.
 cjson.null = nil
-

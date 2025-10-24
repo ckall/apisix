@@ -199,11 +199,16 @@ local config_schema = {
                 dns_resolver_valid = {
                     type = "integer",
                 },
+                enable_http2 = {
+                    type = "boolean",
+                    default = true
+                },
                 ssl = {
                     type = "object",
                     properties = {
                         ssl_trusted_certificate = {
                             type = "string",
+                            default = "system"
                         },
                         listen = {
                             type = "array",
@@ -218,13 +223,18 @@ local config_schema = {
                                         minimum = 1,
                                         maximum = 65535
                                     },
-                                    enable_http2 = {
+                                    enable_http3 = {
                                         type = "boolean",
-                                    }
+                                    },
                                 }
                             }
                         },
-                        key_encrypt_salt = {
+                    }
+                },
+                data_encryption = {
+                    type = "object",
+                    properties = {
+                        keyring = {
                             anyOf = {
                                 {
                                     type = "array",
@@ -366,7 +376,7 @@ local deployment_schema = {
             role_traditional = {
                 properties = {
                     config_provider = {
-                        enum = {"etcd"}
+                        enum = {"etcd", "yaml"}
                     },
                 },
                 required = {"config_provider"}
@@ -395,7 +405,7 @@ local deployment_schema = {
             role_data_plane = {
                 properties = {
                     config_provider = {
-                        enum = {"etcd", "yaml", "xds"}
+                        enum = {"etcd", "yaml", "json", "xds"}
                     },
                 },
                 required = {"config_provider"}

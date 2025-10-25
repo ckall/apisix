@@ -20,7 +20,7 @@ local debug = debug
 local ipairs = ipairs
 local pcall = pcall
 local table_insert = table.insert
-local jit = jit
+local jit = rawget(_G, "jit")
 
 local _M = {}
 

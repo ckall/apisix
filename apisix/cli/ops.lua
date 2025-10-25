@@ -50,6 +50,7 @@ local str_byte = string.byte
 local str_sub = string.sub
 local str_format = string.format
 
+
 local _M = {}
 
 
@@ -193,7 +194,7 @@ local function init(env)
         checked_admin_key = true
         print("Warning! Admin key is bypassed! "
                 .. "If you are deploying APISIX in a production environment, "
-                .. "please disable `admin_key_required` and set a secure admin key!")
+                .. "please enable `admin_key_required` and set a secure admin key!")
     end
 
     if yaml_conf.apisix.enable_admin and not checked_admin_key then
@@ -221,12 +222,9 @@ Please modify "admin_key" in conf/config.yaml .
             end
 
             if admin.key == "" then
-                util.die(help:format("ERROR: missing valid Admin API token."), "\n")
-            end
-
-            if admin.key == "edd1c9f034335f136f87ad84b625c8f1" then
                 stderr:write(
-                    help:format([[WARNING: using fixed Admin API token has security risk.]]),
+                    help:format([[WARNING: using empty Admin API.
+                    This will trigger APISIX to automatically generate a random Admin API token.]]),
                     "\n"
                 )
             end
@@ -244,12 +242,6 @@ Please modify "admin_key" in conf/config.yaml .
         then
             util.die("missing ssl cert for https admin")
         end
-    end
-
-    if yaml_conf.apisix.enable_admin and
-        yaml_conf.deployment.config_provider == "yaml"
-    then
-        util.die("ERROR: Admin API can only be used with etcd config_provider.\n")
     end
 
     local or_ver = get_openresty_version()
@@ -351,6 +343,13 @@ Please modify "admin_key" in conf/config.yaml .
                                                           9180, port)
     end
 
+    local status_server_addr
+    if yaml_conf.apisix.status then
+        status_server_addr = validate_and_get_listen_addr("status port", "127.0.0.1",
+                             yaml_conf.apisix.status.ip, 7085,
+                             yaml_conf.apisix.status.port)
+    end
+
     local control_server_addr
     if yaml_conf.apisix.enable_control then
         if not yaml_conf.apisix.control then
@@ -379,7 +378,8 @@ Please modify "admin_key" in conf/config.yaml .
 
     local ip_port_to_check = {}
 
-    local function listen_table_insert(listen_table, scheme, ip, port, enable_http2, enable_ipv6)
+    local function listen_table_insert(listen_table, scheme, ip, port,
+                                enable_http3, enable_ipv6)
         if type(ip) ~= "string" then
             util.die(scheme, " listen ip format error, must be string", "\n")
         end
@@ -397,7 +397,11 @@ Please modify "admin_key" in conf/config.yaml .
 
         if ip_port_to_check[addr] == nil then
             table_insert(listen_table,
-                    {ip = ip, port = port, enable_http2 = enable_http2})
+                    {
+                        ip = ip,
+                        port = port,
+                        enable_http3 = enable_http3
+                    })
             ip_port_to_check[addr] = scheme
         end
 
@@ -407,7 +411,11 @@ Please modify "admin_key" in conf/config.yaml .
 
             if ip_port_to_check[addr] == nil then
                 table_insert(listen_table,
-                        {ip = ip, port = port, enable_http2 = enable_http2})
+                        {
+                            ip = ip,
+                            port = port,
+                            enable_http3 = enable_http3
+                        })
                 ip_port_to_check[addr] = scheme
             end
         end
@@ -440,17 +448,20 @@ Please modify "admin_key" in conf/config.yaml .
                     port = 9080
                 end
 
-                if enable_http2 == nil then
-                    enable_http2 = false
+                if enable_http2 ~= nil then
+                    util.die("ERROR: port level enable_http2 in node_listen is deprecated"
+                            .. "from 3.9 version, and you should use enable_http2 in "
+                            .. "apisix level.", "\n")
                 end
 
                 listen_table_insert(node_listen, "http", ip, port,
-                        enable_http2, enable_ipv6)
+                        false, enable_ipv6)
             end
         end
     end
     yaml_conf.apisix.node_listen = node_listen
 
+    local enable_http3_in_server_context = false
     local ssl_listen = {}
     -- listen in https, support multiple ports, support specific IP
     for _, value in ipairs(yaml_conf.apisix.ssl.listen) do
@@ -458,6 +469,7 @@ Please modify "admin_key" in conf/config.yaml .
         local port = value.port
         local enable_ipv6 = false
         local enable_http2 = value.enable_http2
+        local enable_http3 = value.enable_http3
 
         if ip == nil then
             ip = "0.0.0.0"
@@ -470,29 +482,25 @@ Please modify "admin_key" in conf/config.yaml .
             port = 9443
         end
 
-        if enable_http2 == nil then
-            enable_http2 = false
+        if enable_http2 ~= nil then
+            util.die("ERROR: port level enable_http2 in ssl.listen is deprecated"
+                      .. "from 3.9 version, and you should use enable_http2 in "
+                      .. "apisix level.", "\n")
+        end
+
+        if enable_http3 == nil then
+            enable_http3 = false
+        end
+        if enable_http3 == true then
+            enable_http3_in_server_context = true
         end
 
         listen_table_insert(ssl_listen, "https", ip, port,
-                enable_http2, enable_ipv6)
+                enable_http3, enable_ipv6)
     end
 
     yaml_conf.apisix.ssl.listen = ssl_listen
-
-    if yaml_conf.apisix.ssl.ssl_trusted_certificate ~= nil then
-        local cert_path = yaml_conf.apisix.ssl.ssl_trusted_certificate
-        -- During validation, the path is relative to PWD
-        -- When Nginx starts, the path is relative to conf
-        -- Therefore we need to check the absolute version instead
-        cert_path = pl_path.abspath(cert_path)
-
-        if not pl_path.exists(cert_path) then
-            util.die("certificate path", cert_path, "doesn't exist\n")
-        end
-
-        yaml_conf.apisix.ssl.ssl_trusted_certificate = cert_path
-    end
+    yaml_conf.apisix.enable_http3_in_server_context = enable_http3_in_server_context
 
     -- enable ssl with place holder crt&key
     yaml_conf.apisix.ssl.ssl_cert = "cert/ssl_PLACE_HOLDER.crt"
@@ -567,6 +575,7 @@ Please modify "admin_key" in conf/config.yaml .
         enabled_plugins = enabled_plugins,
         enabled_stream_plugins = enabled_stream_plugins,
         dubbo_upstream_multiplex_count = dubbo_upstream_multiplex_count,
+        status_server_addr = status_server_addr,
         tcp_enable_ssl = tcp_enable_ssl,
         admin_server_addr = admin_server_addr,
         control_server_addr = control_server_addr,
@@ -601,6 +610,10 @@ Please modify "admin_key" in conf/config.yaml .
             sys_conf[k] = v
         end
     end
+
+    sys_conf.standalone_with_admin_api = env.deployment_role == "traditional" and
+        yaml_conf.apisix.enable_admin and yaml_conf.deployment.config_provider == "yaml"
+
     sys_conf["wasm"] = yaml_conf.wasm
 
 
@@ -675,7 +688,7 @@ Please modify "admin_key" in conf/config.yaml .
 
         for name, value in pairs(exported_vars) do
             if value then
-                table_insert(sys_conf["envs"], name .. "=" .. value)
+                table_insert(sys_conf["envs"], name)
             end
         end
     end
@@ -959,10 +972,7 @@ local function reload(env)
     local test_ret = execute((test_cmd))
     if (test_ret == 0 or test_ret == true) then
         local cmd = env.openresty_args .. [[ -s reload]]
-
-        print("reload: ", cmd)
-
-        --execute(cmd)
+        execute(cmd)
         return
     end
 

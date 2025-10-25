@@ -40,6 +40,7 @@ env MyPort=6443;
 env KUBERNETES_SERVICE_HOST=127.0.0.1;
 env KUBERNETES_SERVICE_PORT=6443;
 env KUBERNETES_CLIENT_TOKEN=$::token_value;
+env KUBERNETES_CLIENT_TOKEN_FILE=$::token_file;
 _EOC_
 
     $block->set_value("main_config", $main_config);
@@ -94,6 +95,20 @@ _EOC_
             }
         }
 
+        location /update_token {
+            content_by_lua_block {
+                local token_file = "$::token_file"
+                local file = io.open(token_file, "w")
+                file:write("invalid_token_value")
+                file:close()
+                ngx.sleep(3)
+                file = io.open(token_file, "w")
+                local token_value = [[$::token_value]]
+                file:write(token_value)
+                file:close()
+            }
+        }
+
 _EOC_
 
     $block->set_value("config", $config);
@@ -128,6 +143,7 @@ GET /compare
   "client": {
     "token": "${KUBERNETES_CLIENT_TOKEN}"
   },
+  "watch_endpoint_slices": false,
   "shared_size": "1m",
   "default_weight": 50
 }
@@ -162,6 +178,7 @@ GET /compare
   "client": {
     "token": "${KUBERNETES_CLIENT_TOKEN}"
   },
+  "watch_endpoint_slices": false,
   "shared_size": "1m",
   "default_weight": 50
 }
@@ -198,6 +215,7 @@ GET /compare
   "client": {
     "token": "${KUBERNETES_CLIENT_TOKEN}"
   },
+  "watch_endpoint_slices": false,
   "shared_size": "2m",
   "default_weight": 50
 }
@@ -232,6 +250,7 @@ GET /compare
   "client": {
     "token": "${KUBERNETES_CLIENT_TOKEN}"
   },
+  "watch_endpoint_slices": false,
   "shared_size": "1m",
   "default_weight": 33
 }
@@ -283,6 +302,7 @@ GET /compare
     "client": {
       "token": "${KUBERNETES_CLIENT_TOKEN}"
     },
+    "watch_endpoint_slices": false,
     "default_weight": 50,
     "shared_size": "1m"
   },
@@ -296,10 +316,107 @@ GET /compare
     "client": {
       "token": "${KUBERNETES_CLIENT_TOKEN}"
     },
+    "watch_endpoint_slices": false,
     "default_weight": 33,
     "shared_size": "2m"
   }
 ]
+--- more_headers
+Content-type: application/json
+--- response_body
+true
+
+
+
+=== TEST 6: set watch_endpoint_slices true and use kubernetes endpointslices api
+--- yaml_config
+apisix:
+  node_listen: 1984
+deployment:
+  role: data_plane
+  role_data_plane:
+    config_provider: yaml
+discovery:
+  kubernetes:
+    client:
+        token: ${KUBERNETES_CLIENT_TOKEN}
+    default_weight: 33
+    watch_endpoint_slices: true
+--- request
+GET /compare
+{
+  "service": {
+    "schema": "https",
+    "host": "${KUBERNETES_SERVICE_HOST}",
+    "port": "${KUBERNETES_SERVICE_PORT}"
+  },
+  "client": {
+    "token": "${KUBERNETES_CLIENT_TOKEN}"
+  },
+  "watch_endpoint_slices": true,
+  "shared_size": "1m",
+  "default_weight": 33
+}
+--- more_headers
+Content-type: application/json
+--- response_body
+true
+
+
+
+=== TEST 7: auto read token file before get token value
+--- yaml_config
+apisix:
+  node_listen: 1984
+  config_center: yaml
+deployment:
+  role: data_plane
+  role_data_plane:
+    config_provider: yaml
+discovery:
+  kubernetes:
+    client:
+        token_file: "${KUBERNETES_CLIENT_TOKEN_FILE}"
+--- request
+GET /update_token
+--- log_level: debug
+--- grep_error_log eval
+qr/re-read the token value/
+--- grep_error_log_out
+re-read the token value
+re-read the token value
+
+
+
+=== TEST 8: default value with minimal configuration and large shared_size
+--- yaml_config
+apisix:
+  node_listen: 1984
+  config_center: yaml
+deployment:
+  role: data_plane
+  role_data_plane:
+    config_provider: yaml
+discovery:
+  kubernetes:
+    client:
+        token: ${KUBERNETES_CLIENT_TOKEN}
+    shared_size: "1000m"
+--- request
+GET /compare
+{
+  "service": {
+    "schema": "https",
+    "host": "${KUBERNETES_SERVICE_HOST}",
+    "port": "${KUBERNETES_SERVICE_PORT}"
+  },
+  "client": {
+    "token": "${KUBERNETES_CLIENT_TOKEN}"
+  },
+  "watch_endpoint_slices": false,
+  "shared_size": "1000m",
+  "default_weight": 50
+}
 --- more_headers
 Content-type: application/json
 --- response_body

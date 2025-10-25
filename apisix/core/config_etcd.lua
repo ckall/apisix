@@ -29,10 +29,12 @@ local core_str     = require("apisix.core.string")
 local new_tab      = require("table.new")
 local inspect      = require("inspect")
 local errlog       = require("ngx.errlog")
+local process      = require("ngx.process")
 local log_level    = errlog.get_sys_filter_level()
 local NGX_INFO     = ngx.INFO
 local check_schema = require("apisix.core.schema").check
 local exiting      = ngx.worker.exiting
+local worker_id    = ngx.worker.id
 local insert_tab   = table.insert
 local type         = type
 local ipairs       = ipairs
@@ -40,6 +42,7 @@ local setmetatable = setmetatable
 local ngx_sleep    = require("apisix.core.utils").sleep
 local ngx_timer_at = ngx.timer.at
 local ngx_time     = ngx.time
+local ngx          = ngx
 local sub_str      = string.sub
 local tostring     = tostring
 local tonumber     = tonumber
@@ -65,6 +68,7 @@ local err_etcd_grpc_engine_timeout = "context deadline exceeded"
 local err_etcd_grpc_ngx_timeout = "timeout"
 local err_etcd_unhealthy_all = "has no healthy etcd endpoint available"
 local health_check_shm_name = "etcd-cluster-health-check"
+local status_report_shared_dict_name = "status-report"
 if not is_http then
     health_check_shm_name = health_check_shm_name .. "-stream"
 end
@@ -227,7 +231,7 @@ local function do_run_watch(premature)
             log.warn("watch canceled by etcd, res: ", inspect(res))
             if res.result.compact_revision then
                 watch_ctx.rev = tonumber(res.result.compact_revision)
-                log.warn("etcd compacted, compact_revision=", watch_ctx.rev)
+                log.error("etcd compacted, compact_revision=", watch_ctx.rev)
                 produce_res(nil, "compacted")
             end
             cancel_watch(http_cli)
@@ -257,6 +261,20 @@ local function do_run_watch(premature)
         end
 
         local rev = tonumber(res.result.header.revision)
+        if rev == nil then
+            log.warn("receive a invalid revision header, header: ", inspect(res.result.header))
+            cancel_watch(http_cli)
+            break
+        end
+
+        if rev < watch_ctx.rev then
+            log.error("received smaller revision, rev=", rev, ", watch_ctx.rev=",
+                      watch_ctx.rev,". etcd may be restarted. resyncing....")
+            watch_ctx.rev = rev
+            produce_res(nil, "restarted")
+            cancel_watch(http_cli)
+            break
+        end
         if rev > watch_ctx.rev then
             watch_ctx.rev = rev + 1
         end
@@ -284,7 +302,8 @@ local function run_watch(premature)
 
     local ok, err = ngx_thread_wait(run_watch_th, check_worker_th)
     if not ok then
-        log.error("check_worker thread terminates failed, retart checker, error: " .. err)
+        log.error("run_watch or check_worker thread terminates failed",
+                        " restart those threads, error: ", inspect(err))
     end
 
     ngx_thread_kill(run_watch_th)
@@ -467,6 +486,23 @@ local function short_key(self, str)
 end
 
 
+local function sync_status_to_shdict(status)
+    local local_conf = config_local.local_conf()
+    if not local_conf.apisix.status then
+        return
+    end
+    if process.type() ~= "worker" then
+        return
+    end
+    local status_shdict = ngx.shared[status_report_shared_dict_name]
+    if not status_shdict then
+        return
+    end
+    local id = worker_id()
+    status_shdict:set(id, status)
+end
+
+
 local function load_full_data(self, dir_res, headers)
     local err
     local changed = false
@@ -538,7 +574,9 @@ local function load_full_data(self, dir_res, headers)
             end
 
             if data_valid and self.checker then
-                data_valid, err = self.checker(item.value)
+                -- TODO: An opts table should be used
+                -- as different checkers may use different parameters
+                data_valid, err = self.checker(item.value, item.key)
                 if not data_valid then
                     log.error("failed to check item data of [", self.key,
                               "] err:", err, " ,val: ", json.delay_encode(item.value))
@@ -563,6 +601,7 @@ local function load_full_data(self, dir_res, headers)
     end
 
     if headers then
+        self.prev_index = tonumber(headers["X-Etcd-Index"]) or 0
         self:upgrade_version(headers["X-Etcd-Index"])
     end
 
@@ -571,6 +610,7 @@ local function load_full_data(self, dir_res, headers)
     end
 
     self.need_reload = false
+    sync_status_to_shdict(true)
 end
 
 
@@ -627,9 +667,9 @@ local function sync_data(self)
     log.info("res: ", json.delay_encode(dir_res, true), ", err: ", err)
 
     if not dir_res then
-        if err == "compacted" then
+        if err == "compacted" or err == "restarted" then
             self.need_reload = true
-            log.warn("waitdir [", self.key, "] err: ", err,
+            log.error("waitdir [", self.key, "] err: ", err,
                      ", will read the configuration again via readdir")
             return false
         end
@@ -651,6 +691,7 @@ local function sync_data(self)
     -- waitdir will return [res] even for self.single_item = true
     for _, res in ipairs(res_copy) do
         local key
+        local data_valid = true
         if self.single_item then
             key = self.key
         else
@@ -658,33 +699,37 @@ local function sync_data(self)
         end
 
         if res.value and not self.single_item and type(res.value) ~= "table" then
-            self:upgrade_version(res.modifiedIndex)
-            return false, "invalid item data of [" .. self.key .. "/" .. key
-                            .. "], val: " .. res.value
-                            .. ", it should be an object"
+            data_valid = false
+            log.error("invalid item data of [", self.key .. "/" .. key,
+                      "], val: ", res.value,
+                      ", it should be an object")
         end
 
-        if res.value and self.item_schema then
-            local ok, err = check_schema(self.item_schema, res.value)
-            if not ok then
-                self:upgrade_version(res.modifiedIndex)
-
-                return false, "failed to check item data of ["
-                                .. self.key .. "] err:" .. err
-            end
-
-            if self.checker then
-                local ok, err = self.checker(res.value)
-                if not ok then
-                    self:upgrade_version(res.modifiedIndex)
-
-                    return false, "failed to check item data of ["
-                                    .. self.key .. "] err:" .. err
-                end
+        if data_valid and res.value and self.item_schema then
+            data_valid, err = check_schema(self.item_schema, res.value)
+            if not data_valid then
+                log.error("failed to check item data of [", self.key,
+                          "] err:", err, " ,val: ", json.encode(res.value))
             end
         end
 
+        if data_valid and res.value and self.checker then
+            data_valid, err = self.checker(res.value, res.key)
+            if not data_valid then
+                log.error("failed to check item data of [", self.key,
+                          "] err:", err, " ,val: ", json.delay_encode(res.value))
+            end
+        end
+
+        -- the modifiedIndex tracking should be updated regardless of the validity of the config
         self:upgrade_version(res.modifiedIndex)
+
+        if not data_valid then
+            -- do not update the config cache when the data is invalid
+            -- invalid data should only cancel this config item update, not discard
+            -- the remaining events, use continue instead of loop break and return
+            goto CONTINUE
+        end
 
         if res.dir then
             if res.value then
@@ -758,6 +803,8 @@ local function sync_data(self)
         end
 
         self.conf_version = self.conf_version + 1
+
+        ::CONTINUE::
     end
 
     return self.values
@@ -840,7 +887,7 @@ local function _automatic_fetch(premature, self)
                             i = i + 1
                             ngx_sleep(backoff_duration)
                             _, err = sync_data(self)
-                            if not err or not string.find(err, err_etcd_unhealthy_all) then
+                            if not err or not core_str.find(err, err_etcd_unhealthy_all) then
                                 log.warn("reconnected to etcd")
                                 reconnected = true
                                 break
@@ -938,7 +985,6 @@ function _M.new(key, opts)
     if not health_check_timeout or health_check_timeout < 0 then
         health_check_timeout = 10
     end
-
     local automatic = opts and opts.automatic
     local item_schema = opts and opts.item_schema
     local filter_fun = opts and opts.filter
@@ -1105,6 +1151,7 @@ end
 
 
 function _M.init_worker()
+    sync_status_to_shdict(false)
     local local_conf, err = config_local.local_conf()
     if not local_conf then
         return nil, err

@@ -1,0 +1,62 @@
+services:
+  gateway:
+    build:
+      dockerfile: Dockerfile
+    depends_on:
+      - etcd
+    networks:
+      - apisix
+    ports:
+      - "80:9080"
+      - "9180:9180"
+      - "9091:9091"
+      - "9090:9090"
+#      - "9990:9990"
+    restart: always
+
+  etcd:
+    image: registry.cn-hangzhou.aliyuncs.com/ckall/etcd-apisix:3.8.0
+    ports:
+      - "2380:2380"
+      - "2379:2379"
+    networks:
+      - apisix
+    volumes:
+      - ./etcd:/bitnami/etcd/data
+    environment:
+      ETCD_ENABLE_V2: "true"
+      ALLOW_NONE_AUTHENTICATION: "yes"
+      ETCD_ADVERTISE_CLIENT_URLS: "http://etcd:2379"
+      ETCD_LISTEN_CLIENT_URLS: "http://0.0.0.0:2379"
+      ETCD_SNAPSHOTS_DIR: "/bitnami/etcd/data"
+    restart: always
+    healthcheck:
+      test: [ "CMD", "etcdctl", "--endpoints=http://etcd:2379", "endpoint", "health" ]
+      interval: 5s
+      timeout: 10s
+      retries: 3
+  dashboard:
+    image: apache/apisix-dashboard:3.0.1-alpine
+    depends_on:
+      - etcd
+    networks:
+      - apisix
+    volumes:
+      - ./conf/config.dashboard.yaml:/usr/local/apisix-dashboard/conf/conf.yaml
+      - ./conf/schema.json:/usr/local/apisix-dashboard/conf/schema.json
+    ports:
+      - "9002:9000"
+    restart: always
+
+
+  etcdkeeper:
+    image: evildecay/etcdkeeper
+    ports:
+      - "28080:8080"
+    networks:
+      - apisix
+    depends_on:
+      - etcd
+    restart: always
+networks:
+  apisix:

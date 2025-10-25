@@ -37,18 +37,21 @@ ENV_TAR                ?= tar
 ENV_INSTALL            ?= install
 ENV_RM                 ?= rm -vf
 ENV_DOCKER             ?= docker
-ENV_DOCKER_COMPOSE     ?= docker-compose --project-directory $(CURDIR) -p $(project_name) -f $(project_compose_ci)
+ENV_DOCKER_COMPOSE     ?= docker compose --project-directory $(CURDIR) -p $(project_name) -f $(project_compose_ci)
 ENV_NGINX              ?= $(ENV_NGINX_EXEC) -p $(CURDIR) -c $(CURDIR)/conf/nginx.conf
 ENV_NGINX_EXEC         := $(shell command -v openresty 2>/dev/null || command -v nginx 2>/dev/null)
 ENV_OPENSSL_PREFIX     ?= /usr/local/openresty/openssl3
+ENV_LIBYAML_INSTALL_PREFIX ?= /usr
 ENV_LUAROCKS           ?= luarocks
 ## These variables can be injected by luarocks
 ENV_INST_PREFIX        ?= /usr
 ENV_INST_LUADIR        ?= $(ENV_INST_PREFIX)/share/lua/5.1
 ENV_INST_BINDIR        ?= $(ENV_INST_PREFIX)/bin
-ENV_HOMEBREW_PREFIX    ?= /usr/local
-ENV_RUNTIME_VER	     ?= $(shell $(ENV_NGINX_EXEC) version 2>&1 | tr ' ' '\n'  | grep 'APISIX_RUNTIME_VER' | cut -d '=' -f2)
-#ENV_LUAROCKS_SERVER  =  https://luarocks.cn
+ENV_RUNTIME_VER	     ?= $(shell $(ENV_NGINX_EXEC) -V 2>&1 | tr ' ' '\n'  | grep 'APISIX_RUNTIME_VER' | cut -d '=' -f2)
+
+IMAGE_NAME = apache/apisix
+ENV_APISIX_IMAGE_TAG_NAME  ?= $(IMAGE_NAME):$(VERSION)
+
 -include .requirements
 export
 
@@ -61,32 +64,9 @@ ifdef ENV_LUAROCKS_SERVER
 endif
 
 ifneq ($(shell test -d $(ENV_OPENSSL_PREFIX) && echo -n yes), yes)
-	ENV_NGINX_PREFIX := $(shell $(ENV_NGINX_EXEC) version 2>&1 | grep -Eo 'prefix=(.*)/nginx\s+' | grep -Eo '/.*/')
+	ENV_NGINX_PREFIX := $(shell $(ENV_NGINX_EXEC) -V 2>&1 | grep -Eo 'prefix=(.*)/nginx\s+' | grep -Eo '/.*/')
 	ifeq ($(shell test -d $(addprefix $(ENV_NGINX_PREFIX), openssl3) && echo -n yes), yes)
 		ENV_OPENSSL_PREFIX := $(addprefix $(ENV_NGINX_PREFIX), openssl3)
-	endif
-endif
-
-# ENV patch for darwin
-ifeq ($(ENV_OS_NAME), darwin)
-	ifeq ($(ENV_OS_ARCH), arm64)
-		ENV_HOMEBREW_PREFIX := /opt/homebrew
-		ENV_INST_BINDIR := $(ENV_INST_PREFIX)/local/bin
-		ENV_INST_LUADIR := $(shell which lua | xargs realpath | sed 's/bin\/lua//g')
-	endif
-
-	# OSX archive `._` cache file
-	ENV_TAR      := COPYFILE_DISABLE=1 $(ENV_TAR)
-	ENV_LUAROCKS := $(ENV_LUAROCKS) --lua-dir=$(ENV_HOMEBREW_PREFIX)/opt/lua@5.1
-
-	ifeq ($(shell test -d $(ENV_HOMEBREW_PREFIX)/opt/openresty-openssl && echo -n yes), yes)
-		ENV_OPENSSL_PREFIX := $(ENV_HOMEBREW_PREFIX)/opt/openresty-openssl
-	endif
-	ifeq ($(shell test -d $(ENV_HOMEBREW_PREFIX)/opt/openresty-openssl3 && echo -n yes), yes)
-		ENV_OPENSSL_PREFIX := $(ENV_HOMEBREW_PREFIX)/opt/openresty-openssl3
-	endif
-	ifeq ($(shell test -d $(ENV_HOMEBREW_PREFIX)/opt/pcre && echo -n yes), yes)
-		ENV_PCRE_PREFIX := $(ENV_HOMEBREW_PREFIX)/opt/pcre
 	endif
 endif
 
@@ -144,24 +124,18 @@ endif
 .PHONY: help
 help:
 	@$(call func_echo_success_status, "Makefile rules:")
-	@echo
-	@if [ '$(ENV_OS_NAME)' = 'darwin' ]; then \
-		awk '{ if(match($$0, /^#{3}([^:]+):(.*)$$/)){ split($$0, res, ":"); gsub(/^#{3}[ ]*/, "", res[1]); _desc=$$0; gsub(/^#{3}([^:]+):[ \t]*/, "", _desc); printf("    make %-15s : %-10s\n", res[1], _desc) } }' Makefile; \
-	else \
-		awk '{ if(match($$0, /^\s*#{3}\s*([^:]+)\s*:\s*(.*)$$/, res)){ printf("    make %-15s : %-10s\n", res[1], res[2]) } }' Makefile; \
-	fi
-	@echo
+	@awk '{ if(match($$0, /^\s*#{3}\s*([^:]+)\s*:\s*(.*)$$/, res)){ printf("    make %-15s : %-10s\n", res[1], res[2]) } }' Makefile
 
 
 ### deps : Installing dependencies
 .PHONY: deps
-deps: install-runtime
+deps:
 	$(eval ENV_LUAROCKS_VER := $(shell $(ENV_LUAROCKS) --version | grep -E -o "luarocks [0-9]+."))
 	@if [ '$(ENV_LUAROCKS_VER)' = 'luarocks 3.' ]; then \
 		mkdir -p ~/.luarocks; \
 		$(ENV_LUAROCKS) config $(ENV_LUAROCKS_FLAG_LOCAL) variables.OPENSSL_LIBDIR $(addprefix $(ENV_OPENSSL_PREFIX), /lib); \
 		$(ENV_LUAROCKS) config $(ENV_LUAROCKS_FLAG_LOCAL) variables.OPENSSL_INCDIR $(addprefix $(ENV_OPENSSL_PREFIX), /include); \
-		[ '$(ENV_OS_NAME)' == 'darwin' ] && $(ENV_LUAROCKS) config $(ENV_LUAROCKS_FLAG_LOCAL) variables.PCRE_INCDIR $(addprefix $(ENV_PCRE_PREFIX), /include); \
+		$(ENV_LUAROCKS) config $(ENV_LUAROCKS_FLAG_LOCAL) variables.YAML_DIR $(ENV_LIBYAML_INSTALL_PREFIX); \
 		$(ENV_LUAROCKS) install apisix-master-0.rockspec --tree deps --only-deps $(ENV_LUAROCKS_SERVER_OPT); \
 	else \
 		$(call func_echo_warn_status, "WARNING: You're not using LuaRocks 3.x; please remove the luarocks and reinstall it via https://raw.githubusercontent.com/apache/apisix/master/utils/linux-install-luarocks.sh"); \
@@ -171,7 +145,11 @@ deps: install-runtime
 
 ### undeps : Uninstalling dependencies
 .PHONY: undeps
-undeps: uninstall-runtime
+undeps: uninstall-rocks uninstall-runtime
+
+
+.PHONY: uninstall-rocks
+uninstall-rocks:
 	@$(call func_echo_status, "$@ -> [ Start ]")
 	$(ENV_LUAROCKS) purge --tree=deps
 	@$(call func_echo_success_status, "$@ -> [ Done ]")
@@ -255,7 +233,6 @@ reload: runtime
 	$(ENV_APISIX) reload
 	@$(call func_echo_success_status, "$@ -> [ Done ]")
 
-### install-runtime : Installing dependencies install-runtime
 .PHONY: install-runtime
 install-runtime:
 ifneq ($(ENV_RUNTIME_VER), $(APISIX_RUNTIME))
@@ -276,8 +253,6 @@ install: runtime
 	$(ENV_INSTALL) -d /usr/local/apisix/logs/
 	$(ENV_INSTALL) -d /usr/local/apisix/conf/cert
 	$(ENV_INSTALL) conf/mime.types /usr/local/apisix/conf/mime.types
-	$(ENV_INSTALL) conf/config.yaml /usr/local/apisix/conf/config.yaml
-	$(ENV_INSTALL) conf/config-default.yaml /usr/local/apisix/conf/config-default.yaml
 	$(ENV_INSTALL) conf/debug.yaml /usr/local/apisix/conf/debug.yaml
 	$(ENV_INSTALL) conf/cert/* /usr/local/apisix/conf/cert/
 
@@ -332,9 +307,6 @@ install: runtime
 	$(ENV_INSTALL) -d $(ENV_INST_LUADIR)/apisix/plugins/ext-plugin
 	$(ENV_INSTALL) apisix/plugins/ext-plugin/*.lua $(ENV_INST_LUADIR)/apisix/plugins/ext-plugin/
 
-	$(ENV_INSTALL) -d $(ENV_INST_LUADIR)/apisix/plugins/google-cloud-logging
-	$(ENV_INSTALL) apisix/plugins/google-cloud-logging/*.lua $(ENV_INST_LUADIR)/apisix/plugins/google-cloud-logging/
-
 	$(ENV_INSTALL) -d $(ENV_INST_LUADIR)/apisix/plugins/grpc-transcode
 	$(ENV_INSTALL) apisix/plugins/grpc-transcode/*.lua $(ENV_INST_LUADIR)/apisix/plugins/grpc-transcode/
 
@@ -343,6 +315,9 @@ install: runtime
 
 	$(ENV_INSTALL) -d $(ENV_INST_LUADIR)/apisix/plugins/limit-conn
 	$(ENV_INSTALL) apisix/plugins/limit-conn/*.lua $(ENV_INST_LUADIR)/apisix/plugins/limit-conn/
+
+	$(ENV_INSTALL) -d $(ENV_INST_LUADIR)/apisix/plugins/limit-req
+	$(ENV_INSTALL) apisix/plugins/limit-req/*.lua $(ENV_INST_LUADIR)/apisix/plugins/limit-req/
 
 	$(ENV_INSTALL) -d $(ENV_INST_LUADIR)/apisix/plugins/limit-count
 	$(ENV_INSTALL) apisix/plugins/limit-count/*.lua $(ENV_INST_LUADIR)/apisix/plugins/limit-count/
@@ -398,6 +373,23 @@ install: runtime
 	$(ENV_INSTALL) -d $(ENV_INST_LUADIR)/apisix/utils
 	$(ENV_INSTALL) apisix/utils/*.lua $(ENV_INST_LUADIR)/apisix/utils/
 
+	$(ENV_INSTALL) -d $(ENV_INST_LUADIR)/apisix/plugins/ai-proxy
+	$(ENV_INSTALL) apisix/plugins/ai-proxy/*.lua $(ENV_INST_LUADIR)/apisix/plugins/ai-proxy
+
+	$(ENV_INSTALL) -d $(ENV_INST_LUADIR)/apisix/plugins/ai-drivers
+	$(ENV_INSTALL) apisix/plugins/ai-drivers/*.lua $(ENV_INST_LUADIR)/apisix/plugins/ai-drivers
+
+	$(ENV_INSTALL) -d $(ENV_INST_LUADIR)/apisix/plugins/ai-rag/embeddings
+	$(ENV_INSTALL) apisix/plugins/ai-rag/embeddings/*.lua $(ENV_INST_LUADIR)/apisix/plugins/ai-rag/embeddings
+	$(ENV_INSTALL) -d $(ENV_INST_LUADIR)/apisix/plugins/ai-rag/vector-search
+	$(ENV_INSTALL) apisix/plugins/ai-rag/vector-search/*.lua $(ENV_INST_LUADIR)/apisix/plugins/ai-rag/vector-search
+
+	$(ENV_INSTALL) -d $(ENV_INST_LUADIR)/apisix/plugins/mcp/broker
+	$(ENV_INSTALL) -d $(ENV_INST_LUADIR)/apisix/plugins/mcp/transport
+	$(ENV_INSTALL) apisix/plugins/mcp/*.lua $(ENV_INST_LUADIR)/apisix/plugins/mcp
+	$(ENV_INSTALL) apisix/plugins/mcp/broker/*.lua $(ENV_INST_LUADIR)/apisix/plugins/mcp/broker
+	$(ENV_INSTALL) apisix/plugins/mcp/transport/*.lua $(ENV_INST_LUADIR)/apisix/plugins/mcp/transport
+
 	$(ENV_INSTALL) bin/apisix $(ENV_INST_BINDIR)/apisix
 
 
@@ -450,7 +442,6 @@ compress-tar:
 	./apisix \
 	./bin \
 	./conf \
-	./apisix-$(VERSION)*.rockspec \
 	./apisix-master-0.rockspec \
 	LICENSE \
 	Makefile \
@@ -484,6 +475,20 @@ ci-env-rebuild:
 	$(ENV_DOCKER_COMPOSE) build
 	@$(call func_echo_success_status, "$@ -> [ Done ]")
 
+### build : Installing build
+.PHONY: build
+build:
+	$(eval ENV_LUAROCKS_VER := $(shell $(ENV_LUAROCKS) --version | grep -E -o "luarocks [0-9]+."))
+	@if [ '$(ENV_LUAROCKS_VER)' = 'luarocks 3.' ]; then \
+		mkdir -p ~/.luarocks; \
+		$(ENV_LUAROCKS) config $(ENV_LUAROCKS_FLAG_LOCAL) variables.OPENSSL_LIBDIR $(addprefix $(ENV_OPENSSL_PREFIX), /lib); \
+		$(ENV_LUAROCKS) config $(ENV_LUAROCKS_FLAG_LOCAL) variables.OPENSSL_INCDIR $(addprefix $(ENV_OPENSSL_PREFIX), /include); \
+		$(ENV_LUAROCKS) config $(ENV_LUAROCKS_FLAG_LOCAL) variables.YAML_DIR $(ENV_LIBYAML_INSTALL_PREFIX); \
+		$(ENV_LUAROCKS) install apisix-master-0.rockspec --tree deps --only-deps $(ENV_LUAROCKS_SERVER_OPT); \
+	else \
+		$(call func_echo_warn_status, "WARNING: You're not using LuaRocks 3.x; please remove the luarocks and reinstall it via https://raw.githubusercontent.com/apache/apisix/master/utils/linux-install-luarocks.sh"); \
+		exit 1; \
+	fi
 
 ### ci-env-down : CI env destroy
 .PHONY: ci-env-down
@@ -493,24 +498,39 @@ ci-env-down:
 	$(ENV_DOCKER_COMPOSE) down
 	@$(call func_echo_success_status, "$@ -> [ Done ]")
 
-### start etcd
-.PHONY: start-etcd
-start-etcd:
-	cd etcd-v3.4.18-linux-amd64 && cp -a etcd etcdctl /usr/bin/ && nohup etcd >/tmp/etcd.log 2>&1 &
+### ci-env-stop : CI env temporary stop
+.PHONY: ci-env-stop
+ci-env-stop:
+	@$(call func_echo_status, "$@ -> [ Start ]")
+	$(ENV_DOCKER_COMPOSE) stop
+	@$(call func_echo_success_status, "$@ -> [ Done ]")
 
+### build-on-debian-dev : Build apache/apisix:xx-debian-dev image
+.PHONY: build-on-debian-dev
+build-on-debian-dev:
+	@$(call func_echo_status, "$@ -> [ Start ]")
+	$(ENV_DOCKER) build -t $(ENV_APISIX_IMAGE_TAG_NAME)-debian-dev \
+		--build-arg TARGETARCH=$(ENV_OS_ARCH) \
+		--build-arg CODE_PATH=. \
+		--build-arg ENTRYPOINT_PATH=./docker/debian-dev/docker-entrypoint.sh \
+		--build-arg INSTALL_BROTLI=./docker/debian-dev/install-brotli.sh \
+		--build-arg CHECK_STANDALONE_CONFIG=./docker/utils/check_standalone_config.sh \
+		-f ./docker/debian-dev/Dockerfile .
+	@$(call func_echo_success_status, "$@ -> [ Done ]")
 
+.PHONY: push-on-debian-dev
+push-on-debian-dev:
+	@$(call func_echo_status, "$@ -> [ Start ]")
+	$(ENV_DOCKER) tag $(ENV_APISIX_IMAGE_TAG_NAME)-debian-dev $(IMAGE_NAME):dev-$(ENV_OS_ARCH)
+	$(ENV_DOCKER) push $(IMAGE_NAME):dev-$(ENV_OS_ARCH)
+	@$(call func_echo_success_status, "$@ -> [ Done ]")
 
-### luarocks : Installing dependencies
-.PHONY: build
-build:
-	$(eval ENV_LUAROCKS_VER := $(shell $(ENV_LUAROCKS) --version | grep -E -o "luarocks [0-9]+."))
-	@if [ '$(ENV_LUAROCKS_VER)' = 'luarocks 3.' ]; then \
-		mkdir -p ~/.luarocks; \
-		$(ENV_LUAROCKS) config $(ENV_LUAROCKS_FLAG_LOCAL) variables.OPENSSL_LIBDIR $(addprefix $(ENV_OPENSSL_PREFIX), /lib); \
-		$(ENV_LUAROCKS) config $(ENV_LUAROCKS_FLAG_LOCAL) variables.OPENSSL_INCDIR $(addprefix $(ENV_OPENSSL_PREFIX), /include); \
-		[ '$(ENV_OS_NAME)' == 'darwin' ] && $(ENV_LUAROCKS) config $(ENV_LUAROCKS_FLAG_LOCAL) variables.PCRE_INCDIR $(addprefix $(ENV_PCRE_PREFIX), /include); \
-		$(ENV_LUAROCKS) install apisix-master-0.rockspec --tree deps --only-deps $(ENV_LUAROCKS_SERVER_OPT); \
-	else \
-		$(call func_echo_warn_status, "WARNING: You're not using LuaRocks 3.x; please remove the luarocks and reinstall it via https://raw.githubusercontent.com/apache/apisix/master/utils/linux-install-luarocks.sh"); \
-		exit 1; \
-	fi
+### merge-dev-tags : Merge architecture-specific dev tags into a single dev tag
+.PHONY: merge-dev-tags
+merge-dev-tags:
+	@$(call func_echo_status, "$@ -> [ Start ]")
+	$(ENV_DOCKER) manifest create $(IMAGE_NAME):dev \
+		$(IMAGE_NAME):dev-amd64 \
+		$(IMAGE_NAME):dev-arm64
+	$(ENV_DOCKER) manifest push $(IMAGE_NAME):dev
+	@$(call func_echo_success_status, "$@ -> [ Done ]")

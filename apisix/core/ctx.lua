@@ -224,6 +224,7 @@ do
         __index = function(t, key)
             local cached = t._cache[key]
             if cached ~= nil then
+                log.debug("serving ctx value from cache for key: ", key)
                 return cached
             end
 
@@ -274,15 +275,23 @@ do
                     end
                 end
 
+            elseif core_str.has_prefix(key, "uri_param_") then
+                -- `uri_param_<name>` provides access to the uri parameters when using
+                -- radixtree_uri_with_parameter
+                if t._ctx.curr_req_matched then
+                    local arg_key = sub_str(key, 11)
+                    val = t._ctx.curr_req_matched[arg_key]
+                end
+
             elseif core_str.has_prefix(key, "http_") then
-                key = key:lower()
-                key = re_gsub(key, "-", "_", "jo")
-                val = get_var(key, t._request)
+                local arg_key = key:lower()
+                arg_key = re_gsub(arg_key, "-", "_", "jo")
+                val = get_var(arg_key, t._request)
 
             elseif core_str.has_prefix(key, "graphql_") then
                 -- trim the "graphql_" prefix
-                key = sub_str(key, 9)
-                val = get_parsed_graphql()[key]
+                local arg_key = sub_str(key, 9)
+                val = get_parsed_graphql()[arg_key]
 
             else
                 local getter = apisix_var_names[key]

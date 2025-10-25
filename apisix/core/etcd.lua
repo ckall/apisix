@@ -22,6 +22,8 @@
 local require           = require
 local fetch_local_conf  = require("apisix.core.config_local").local_conf
 local array_mt          = require("apisix.core.json").array_mt
+local log               = require("apisix.core.log")
+local try_read_attr     = require("apisix.core.table").try_read_attr
 local v3_adapter        = require("apisix.admin.v3_adapter")
 local etcd              = require("resty.etcd")
 local clone_tab         = require("table.clone")
@@ -35,6 +37,81 @@ local ngx_get_phase     = ngx.get_phase
 
 
 local _M = {}
+
+
+local NOT_ALLOW_WRITE_ETCD_WARN = 'Data plane role should not write to etcd. ' ..
+    'This operation will be deprecated in future releases.'
+
+local function is_data_plane()
+    local local_conf, err = fetch_local_conf()
+    if not local_conf then
+        return nil, err
+    end
+
+    local role = try_read_attr(local_conf, "deployment", "role")
+    if role == "data_plane" then
+      return true
+    end
+
+    return false
+end
+
+
+
+local function disable_write_if_data_plane()
+    local data_plane, err = is_data_plane()
+    if err then
+        log.error("failed to check data plane role: ", err)
+        return true, err
+    end
+
+    if data_plane then
+        -- current only warn, will be return false in future releases
+        -- to block etcd write
+        log.warn(NOT_ALLOW_WRITE_ETCD_WARN)
+        return false
+    end
+
+    return false, nil
+end
+
+
+local function wrap_etcd_client(etcd_cli)
+    -- note: methods txn can read and write, don't use txn to write when data plane role
+    local methods_to_wrap = {
+        "set",
+        "setnx",
+        "setx",
+        "delete",
+        "rmdir",
+        "grant",
+        "revoke",
+        "keepalive"
+    }
+
+    local original_methods = {}
+    for _, method in ipairs(methods_to_wrap) do
+        if not etcd_cli[method] then
+            log.error("method ", method, " not found in etcd client")
+            return nil, "method " .. method .. " not found in etcd client"
+        end
+
+        original_methods[method] = etcd_cli[method]
+    end
+
+    for _, method in ipairs(methods_to_wrap) do
+        etcd_cli[method] = function(self, ...)
+            local disable, err = disable_write_if_data_plane()
+            if disable then
+                return nil, err
+            end
+
+            return original_methods[method](self, ...)
+        end
+    end
+
+    return etcd_cli
+end
 
 
 local function _new(etcd_conf)
@@ -66,6 +143,8 @@ local function _new(etcd_conf)
     if not etcd_cli then
         return nil, nil, err
     end
+
+    etcd_cli = wrap_etcd_client(etcd_cli)
 
     return etcd_cli, prefix
 end
@@ -154,6 +233,22 @@ local function kvs_to_node(kvs)
 end
 _M.kvs_to_node = kvs_to_node
 
+local function kvs_to_nodes(res, exclude_dir)
+    res.body.node.dir = true
+    res.body.node.nodes = setmetatable({}, array_mt)
+    if exclude_dir then
+        for i=2, #res.body.kvs do
+            res.body.node.nodes[i-1] = kvs_to_node(res.body.kvs[i])
+        end
+    else
+        for i=1, #res.body.kvs do
+            res.body.node.nodes[i] = kvs_to_node(res.body.kvs[i])
+        end
+    end
+    return res
+end
+
+
 local function not_found(res)
     res.body.message = "Key not found"
     res.reason = "Not found"
@@ -201,22 +296,23 @@ function _M.get_format(res, real_key, is_dir, formatter)
     else
         -- In etcd v2, the direct key asked for is `node`, others which under this dir are `nodes`
         -- While in v3, this structure is flatten and all keys related the key asked for are `kvs`
-        res.body.node = {
-            key = real_key,
-            dir = true,
-            nodes = setmetatable({}, array_mt)
-        }
-        local kvs = res.body.kvs
-        if #kvs >= 1 and not kvs[1].value then
-            res.body.node.createdIndex = tonumber(kvs[1].create_revision)
-            res.body.node.modifiedIndex = tonumber(kvs[1].mod_revision)
-            for i=2, #kvs do
-                res.body.node.nodes[i-1] = kvs_to_node(kvs[i])
+        res.body.node = kvs_to_node(res.body.kvs[1])
+        -- we have a init_dir (for etcd v2) value that can't be deserialized with json,
+        -- but we don't put init_dir for new resource type like consumer credential
+        if not res.body.kvs[1].value then
+            -- remove last "/" when necessary
+            if string.byte(res.body.node.key, -1) == 47 then
+                res.body.node.key = string.sub(res.body.node.key, 1, #res.body.node.key-1)
             end
+            res = kvs_to_nodes(res, true)
         else
-            for i=1, #kvs do
-                res.body.node.nodes[i] = kvs_to_node(kvs[i])
+            -- get dir key by remove last part of node key,
+            -- for example: /apisix/consumers/jack -> /apisix/consumers
+            local last_slash_index = string.find(res.body.node.key, "/[^/]*$")
+            if last_slash_index then
+                res.body.node.key = string.sub(res.body.node.key, 1, last_slash_index-1)
             end
+            res = kvs_to_nodes(res, false)
         end
     end
 
@@ -320,6 +416,12 @@ end
 
 
 local function set(key, value, ttl)
+    local disable, err = disable_write_if_data_plane()
+    if disable then
+        return nil, err
+    end
+
+
     local etcd_cli, prefix, err = get_etcd_cli()
     if not etcd_cli then
         return nil, err
@@ -369,6 +471,11 @@ _M.set = set
 
 
 function _M.atomic_set(key, value, ttl, mod_revision)
+    local disable, err = disable_write_if_data_plane()
+    if disable then
+        return nil, err
+    end
+
     local etcd_cli, prefix, err = get_etcd_cli()
     if not etcd_cli then
         return nil, err
@@ -426,7 +533,13 @@ function _M.atomic_set(key, value, ttl, mod_revision)
 end
 
 
+
 function _M.push(key, value, ttl)
+    local disable, err = disable_write_if_data_plane()
+    if disable then
+        return nil, err
+    end
+
     local etcd_cli, _, err = get_etcd_cli()
     if not etcd_cli then
         return nil, err
@@ -459,6 +572,11 @@ end
 
 
 function _M.delete(key)
+    local disable, err = disable_write_if_data_plane()
+    if disable then
+        return nil, err
+    end
+
     local etcd_cli, prefix, err = get_etcd_cli()
     if not etcd_cli then
         return nil, err
@@ -477,6 +595,35 @@ function _M.delete(key)
     end
 
     -- etcd v3 set would not return kv info
+    v3_adapter.to_v3(res.body, "delete")
+    res.body.node = {}
+    res.body.key = prefix .. key
+
+    return res, nil
+end
+
+function _M.rmdir(key, opts)
+    local disable, err = disable_write_if_data_plane()
+    if disable then
+        return nil, err
+    end
+
+    local etcd_cli, prefix, err = get_etcd_cli()
+    if not etcd_cli then
+        return nil, err
+    end
+
+    local res, err = etcd_cli:rmdir(prefix .. key, opts)
+    if not res then
+        return nil, err
+    end
+
+    res.headers["X-Etcd-Index"] = res.body.header.revision
+
+    if not res.body.deleted then
+        return not_found(res), nil
+    end
+
     v3_adapter.to_v3(res.body, "delete")
     res.body.node = {}
     res.body.key = prefix .. key
@@ -507,6 +654,11 @@ end
 
 
 function _M.keepalive(id)
+    local disable, err = disable_write_if_data_plane()
+    if disable then
+        return nil, err
+    end
+
     local etcd_cli, _, err = get_etcd_cli()
     if not etcd_cli then
         return nil, err

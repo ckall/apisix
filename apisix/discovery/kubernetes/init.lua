@@ -50,6 +50,69 @@ local function sort_nodes_cmp(left, right)
     return left.port < right.port
 end
 
+local function on_endpoint_slices_modified(handle, endpoint)
+    if handle.namespace_selector and
+            not handle:namespace_selector(endpoint.metadata.namespace) then
+        return
+    end
+
+    core.log.debug(core.json.delay_encode(endpoint))
+    core.table.clear(endpoint_buffer)
+
+    local endpointslices = endpoint.endpoints
+    for _, endpointslice in ipairs(endpointslices or {}) do
+        if endpointslice.addresses then
+            local addresses = endpointslices.addresses
+            for _, port in ipairs(endpoint.ports or {}) do
+                local port_name
+                if port.name then
+                    port_name = port.name
+                elseif port.targetPort then
+                    port_name = tostring(port.targetPort)
+                else
+                    port_name = tostring(port.port)
+                end
+
+                if endpointslice.conditions and endpointslice.condition.ready then
+                    local nodes = endpoint_buffer[port_name]
+                    if nodes == nil then
+                        nodes = core.table.new(0, #endpointslices * #addresses)
+                        endpoint_buffer[port_name] = nodes
+                    end
+
+                    for _, address in ipairs(endpointslices.addresses) do
+                        core.table.insert(nodes, {
+                            host = address.ip,
+                            port = port.port,
+                            weight = handle.default_weight
+                        })
+                    end
+                end
+            end
+        end
+    end
+
+    for _, ports in pairs(endpoint_buffer) do
+        for _, nodes in pairs(ports) do
+            core.table.sort(nodes, sort_nodes_cmp)
+        end
+    end
+    local endpoint_key = endpoint.metadata.namespace .. "/" .. endpoint.metadata.name
+    local endpoint_content = core.json.encode(endpoint_buffer, true)
+    local endpoint_version = ngx.crc32_long(endpoint_content)
+
+    local _, err
+    _, err = handle.endpoint_dict:safe_set(endpoint_key .. "#version", endpoint_version)
+    if err then
+        core.log.error("set endpoint version into discovery DICT failed, ", err)
+        return
+    end
+    _, err = handle.endpoint_dict:safe_set(endpoint_key, endpoint_content)
+    if err then
+        core.log.error("set endpoint into discovery DICT failed, ", err)
+        handle.endpoint_dict:delete(endpoint_key .. "#version")
+    end
+end
 
 local function on_endpoint_modified(handle, endpoint)
     if handle.namespace_selector and
@@ -220,13 +283,21 @@ local function read_env(key)
     return key
 end
 
+local function read_token(token_file)
+    local token, err = util.read_file(token_file)
+    if err then
+        return nil, err
+    end
+
+    -- remove possible extra whitespace
+    return util.trim(token)
+end
 
 local function get_apiserver(conf)
     local apiserver = {
         schema = "",
         host = "",
         port = "",
-        token = ""
     }
 
     apiserver.schema = conf.service.schema
@@ -256,27 +327,36 @@ local function get_apiserver(conf)
     end
 
     if conf.client.token then
-        apiserver.token, err = read_env(conf.client.token)
+        local token, err = read_env(conf.client.token)
         if err then
             return nil, err
         end
+        apiserver.token = util.trim(token)
     elseif conf.client.token_file and conf.client.token_file ~= "" then
-        local file
-        file, err = read_env(conf.client.token_file)
-        if err then
-            return nil, err
-        end
+        setmetatable(apiserver, {
+            __index = function(_, key)
+                if key ~= "token" then
+                    return
+                end
 
-        apiserver.token, err = util.read_file(file)
-        if err then
-            return nil, err
-        end
+                local token_file, err = read_env(conf.client.token_file)
+                if err then
+                    core.log.error("failed to read token file path: ", err)
+                    return
+                end
+
+                local token, err = read_token(token_file)
+                if err then
+                    core.log.error("failed to read token from file: ", err)
+                    return
+                end
+                core.log.debug("re-read the token value")
+                return token
+            end
+        })
     else
         return nil, "one of [client.token,client.token_file] should be set but none"
     end
-
-    -- remove possible extra whitespace
-    apiserver.token = apiserver.token:gsub("%s+", "")
 
     if apiserver.schema == "https" and apiserver.token == "" then
         return nil, "apiserver.token should set to non-empty string when service.schema is https"
@@ -367,8 +447,13 @@ local function single_mode_init(conf)
     end
 
     local default_weight = conf.default_weight
-
-    local endpoints_informer, err = informer_factory.new("", "v1", "Endpoints", "endpoints", "")
+    local endpoints_informer, err
+    if conf.watch_endpoint_slices_schema then
+        endpoints_informer, err = informer_factory.new("discovery.k8s.io", "v1",
+                                                       "EndpointSlice", "endpointslices", "")
+    else
+        endpoints_informer, err = informer_factory.new("", "v1", "Endpoints", "endpoints", "")
+    end
     if err then
         error(err)
         return
@@ -377,8 +462,13 @@ local function single_mode_init(conf)
     setup_namespace_selector(conf, endpoints_informer)
     setup_label_selector(conf, endpoints_informer)
 
-    endpoints_informer.on_added = on_endpoint_modified
-    endpoints_informer.on_modified = on_endpoint_modified
+    if conf.watch_endpoint_slices_schema then
+        endpoints_informer.on_added = on_endpoint_slices_modified
+        endpoints_informer.on_modified = on_endpoint_slices_modified
+    else
+        endpoints_informer.on_added = on_endpoint_modified
+        endpoints_informer.on_modified = on_endpoint_modified
+    end
     endpoints_informer.on_deleted = on_endpoint_deleted
     endpoints_informer.pre_list = pre_list
     endpoints_informer.post_list = post_list
@@ -463,7 +553,13 @@ local function multiple_mode_init(confs)
 
         local default_weight = conf.default_weight
 
-        local endpoints_informer, err = informer_factory.new("", "v1", "Endpoints", "endpoints", "")
+        local endpoints_informer, err
+        if conf.watch_endpoint_slices_schema then
+            endpoints_informer, err = informer_factory.new("discovery.k8s.io", "v1",
+                                                           "EndpointSlice", "endpointslices", "")
+        else
+            endpoints_informer, err = informer_factory.new("", "v1", "Endpoints", "endpoints", "")
+        end
         if err then
             error(err)
             return
@@ -472,8 +568,13 @@ local function multiple_mode_init(confs)
         setup_namespace_selector(conf, endpoints_informer)
         setup_label_selector(conf, endpoints_informer)
 
-        endpoints_informer.on_added = on_endpoint_modified
-        endpoints_informer.on_modified = on_endpoint_modified
+        if conf.watch_endpoint_slices_schema then
+            endpoints_informer.on_added = on_endpoint_slices_modified
+            endpoints_informer.on_modified = on_endpoint_slices_modified
+        else
+            endpoints_informer.on_added = on_endpoint_modified
+            endpoints_informer.on_modified = on_endpoint_modified
+        end
         endpoints_informer.on_deleted = on_endpoint_deleted
         endpoints_informer.pre_list = pre_list
         endpoints_informer.post_list = post_list
@@ -530,5 +631,64 @@ function _M.init_worker()
         multiple_mode_init(discovery_conf)
     end
 end
+
+
+local function dump_endpoints_from_dict(endpoint_dict)
+    local keys, err = endpoint_dict:get_keys()
+    if err then
+        core.log.error("get keys from discovery dict failed: ", err)
+        return
+    end
+
+    if not keys or #keys == 0 then
+        return
+    end
+
+    local endpoints = {}
+    for i = 1, #keys do
+        local key = keys[i]
+        -- skip key with suffix #version
+        if key:sub(-#"#version") ~= "#version" then
+            local value = endpoint_dict:get(key)
+            core.table.insert(endpoints, {
+                name = key,
+                value = value
+            })
+        end
+    end
+
+    return endpoints
+end
+
+function _M.dump_data()
+    local discovery_conf = local_conf.discovery.kubernetes
+    local eps = {}
+
+    if #discovery_conf == 0 then
+        -- Single mode: discovery_conf is a single configuration object
+        local endpoint_dict = get_endpoint_dict()
+        local endpoints = dump_endpoints_from_dict(endpoint_dict)
+        if endpoints then
+            core.table.insert(eps, {
+                endpoints = endpoints
+            })
+        end
+    else
+        -- Multiple mode: discovery_conf is an array of configuration objects
+        for _, conf in ipairs(discovery_conf) do
+            local endpoint_dict = get_endpoint_dict(conf.id)
+            local endpoints = dump_endpoints_from_dict(endpoint_dict)
+            if endpoints then
+                core.table.insert(eps, {
+                    id = conf.id,
+                    endpoints = endpoints
+                })
+            end
+        end
+    end
+
+    return {config = discovery_conf, endpoints = eps}
+end
+
 
 return _M

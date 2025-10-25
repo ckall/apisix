@@ -163,6 +163,12 @@ function _M.header_filter(conf, ctx)
         return
     end
 
+    local content_encoded = ngx_header["Content-Encoding"]
+    if content_encoded then
+        -- Don't compress if Content-Encoding is present in upstream data
+        return
+    end
+
     local types = conf.types
     local content_type = ngx_header["Content-Type"]
     if not content_type then
@@ -233,7 +239,8 @@ function _M.body_filter(conf, ctx)
     end
 
     if eof then
-        ngx.arg[1] = ctx.compressor:finish()
+        -- overwriting the arg[1], results into partial response
+        ngx.arg[1] = ngx.arg[1] .. ctx.compressor:finish()
     end
 end
 
